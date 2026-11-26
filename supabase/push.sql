@@ -15,6 +15,7 @@ create table if not exists public.kf_push_config (
 insert into public.kf_push_config (id) values (1) on conflict (id) do nothing;
 alter table public.kf_push_config enable row level security;
 revoke all on public.kf_push_config from anon, authenticated;
+grant select, update on public.kf_push_config to service_role;
 
 -- inscrições: cada celular que ativou as notificações
 create table if not exists public.kf_push_inscricoes (
@@ -27,6 +28,7 @@ create table if not exists public.kf_push_inscricoes (
 alter table public.kf_push_inscricoes enable row level security;
 revoke all on public.kf_push_inscricoes from anon, authenticated;
 grant select, insert, update, delete on public.kf_push_inscricoes to authenticated;
+grant select, delete on public.kf_push_inscricoes to service_role;
 drop policy if exists kf_push_proprio on public.kf_push_inscricoes;
 create policy kf_push_proprio on public.kf_push_inscricoes for all to authenticated
   using (user_id = auth.uid()) with check (user_id = auth.uid() and public.kf_e_membro());
