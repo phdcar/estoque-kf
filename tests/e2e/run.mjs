@@ -69,9 +69,11 @@ async function signup(page, { name, email, code }) {
 }
 const setTime = async (page, iso) => { await page.clock.setSystemTime(new Date(iso)); await page.reload(); await page.waitForFunction(() => !!window.__app); await page.evaluate(() => window.__app.idle()); };
 
-async function addProduct(page, { name, qty, min, file }) {
+async function addProduct(page, { name, qty, min, file, supplier }) {
   await nav(page, '#novo');
   await page.fill('#nm', name);
+  await page.fill('#ct', 'Insumos');
+  await page.fill('#fn', supplier || 'Cremer');
   await page.fill('#qt', String(qty));
   await page.fill('#mn', String(min));
   const t0 = Date.now();
@@ -99,11 +101,11 @@ try {
   let code;
   await step('dono cria a primeira conta e vira dono', async () => {
     await op.goto(URL);
-    await op.getByText('Bem-vindo!').waitFor();
+    await op.waitForSelector('.auth #em');
     await shot(op, '01-entrar');
     await signup(op, { name: 'Carlos', email: 'dono@teste.kf' });
-    await waitHash(op, '#estoque');
-    await op.getByText('Nenhum produto cadastrado ainda.').waitFor();
+    await waitHash(op, '#painel');
+    await op.getByText('Nenhum produto abaixo do mínimo.').waitFor();
     assert.match(await op.textContent('#who'), /Carlos · Dono/);
   });
   await step('dono define início e prazo da conferência e vê o código da clínica', async () => {
@@ -131,7 +133,7 @@ try {
     await page.fill('#nm', 'Bruna');
     await page.fill('#cd', code.toLowerCase());
     await page.click('#go');
-    await waitHash(page, '#estoque');
+    await waitHash(page, '#painel');
     assert.match(await page.textContent('#who'), /Bruna · Funcionário/);
     assert.equal(fake.tables.membros.find(m => m.nome === 'Bruna').papel, 'funcionario');
   });
@@ -154,7 +156,16 @@ try {
     await page.fill('#qt', '2');
     await page.fill('#mn', '1');
     await page.click('#save');
-    assert.match(await page.textContent('#err'), /foto/);
+    assert.match(await page.textContent('#err'), /categoria/);
+    await page.fill('#ct', 'Insumos');
+    await page.click('#save');
+    assert.match(await page.textContent('#err'), /fornecedor/);
+    assert.equal(await page.$eval('#fn', el => el.classList.contains('invalid')), true);
+    await page.fill('#fn', 'Cremer');
+    await page.fill('#mn', '0');
+    await page.click('#save');
+    assert.match(await page.textContent('#err'), /mínimo/);
+    assert.ok(page.url().includes('#novo'), 'não pode salvar com campo faltando');
   });
 
   let r1, r2, r3;
@@ -182,7 +193,7 @@ try {
   });
 
   await step('foto de celular "em pé" (EXIF) sai na orientação certa', async () => {
-    r2 = await addProduct(page, { name: 'Álcool 70% 1L', qty: 3, min: 5, file: 'produto-exif6.jpg' });
+    r2 = await addProduct(page, { name: 'Álcool 70% 1L', qty: 3, min: 5, file: 'produto-exif6.jpg', supplier: 'Farmácia' });
     assert.deepEqual(r2.dims, { lw: 800, lh: 600, ow: 1200, oh: 900 });
   });
 
@@ -207,7 +218,7 @@ try {
     assert.deepEqual(low, ['Álcool 70% 1L']);
     assert.match(await page.textContent('#low-banner'), /1 produto abaixo do mínimo: Álcool 70% 1L/);
     const bg = await page.$eval('li.prod.low', el => getComputedStyle(el).borderColor);
-    assert.equal(bg, 'rgb(198, 40, 40)');
+    assert.equal(bg, 'rgb(179, 38, 30)');
     // vermelho vem primeiro na lista
     assert.equal(await page.$eval('#plist li', el => el.textContent.includes('Álcool')), true);
     await page.waitForFunction(() => [...document.querySelectorAll('img.thumb')].every(i => i.naturalWidth > 0));
@@ -260,7 +271,7 @@ try {
     await nav(page, '#estoque');
     await waitHash(page, '#conferencia');
     await page.getByText('Conte todos os produtos para liberar o app.').waitFor();
-    assert.equal(await page.locator('nav a.disabled').count(), 2); // Estoque e Ajustes
+    assert.equal(await page.locator('nav a.disabled').count(), 3); // Painel, Estoque e Ajustes
     for (const h of ['#ajustes', '#novo', '#historico']) {
       await nav(page, h);
       await waitHash(page, '#conferencia');
@@ -417,8 +428,36 @@ try {
     await synced(op);
     await nav(op, '#estoque');
     assert.ok(op.url().includes('#estoque'));
-    await op.getByText('Conferência ATRASADA (dia 02/12/2026). O funcionário ainda não contou o estoque.').waitFor();
+    await op.getByText('Conferência atrasada (dia 02/12/2026). O funcionário ainda não contou o estoque.').waitFor();
     await shot(op, '07-dono-aviso-atrasada');
+  });
+
+  await step('radar no painel: alerta, reposição por fornecedor e desenho sem foto', async () => {
+    await nav(op, '#novo');
+    await op.fill('#nm', 'AGULHA 31G');
+    await op.fill('#ct', 'Insumos');
+    await op.fill('#fn', 'Mercado Livre');
+    await op.fill('#qt', '0');
+    await op.fill('#mn', '2');
+    await op.click('#save');
+    await waitHash(op, '#produto/');
+    await op.waitForSelector('.hero svg.ill');
+    await op.getByText('Comprar pelo menos 2.').waitFor();
+    await shot(op, '13-produto-sem-foto-desenho');
+    await synced(op);
+    const row = fake.tables.produtos.find(p => p.nome === 'AGULHA 31G');
+    assert.equal(row.fornecedor, 'Mercado Livre');
+    assert.equal(row.categoria, 'Insumos');
+    await nav(op, '#painel');
+    assert.equal(await op.textContent('#radar-n'), '1');
+    assert.deepEqual(await op.$$eval('#alist li.prod .name', els => els.map(e => e.textContent)), ['AGULHA 31G']);
+    assert.equal(await op.locator('#alist li.prod .ping').count(), 1);
+    assert.match(await op.textContent('#shop'), /Mercado Livre.*AGULHA 31G.*comprar 2/s);
+    await op.waitForFunction(() => document.querySelectorAll('.radar .blip').length >= 1);
+    await shot(op, '11-painel-radar');
+    await nav(op, '#estoque/alerta');
+    assert.deepEqual(await op.$$eval('#plist li.prod .name', els => els.map(e => e.textContent)), ['AGULHA 31G']);
+    await shot(op, '12-estoque-filtro-alerta');
   });
 
   await step('dono tira o acesso do funcionário', async () => {
@@ -446,7 +485,7 @@ try {
     await ctx.setOffline(true);
     await page.reload();
     await page.waitForSelector('#main h2');
-    assert.match(await page.textContent('header h1'), /Estoque Clínica KF/);
+    assert.match(await page.textContent('header .brand'), /Clínica KF/);
     await ctx.setOffline(false);
   });
 

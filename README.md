@@ -22,6 +22,15 @@ PWA (app instalável pelo navegador) de controle de estoque, em português do Br
 - Banco e regras de acesso: `supabase/schema.sql` (colar no SQL Editor do Supabase).
 - Endereço e chave pública: `js/config.js`.
 
+## Versão 0.3: padrão visual KF e radar de estoque
+- Identidade KF: azul-noite, marfim e champanhe; títulos em Bodoni Moda e texto em Jost (fontes em `fonts/`, licença OFL);
+  logo da árvore em `icons/kf-logo.png`.
+- Painel com radar: abaixo do mínimo, esgotados, no limite (até 25% acima do mínimo), em dia e cadastro incompleto.
+- Reposição por fornecedor, com botão para enviar a lista (WhatsApp, e-mail).
+- Fornecedor, categoria, quantidade e mínimo (1 ou mais) são obrigatórios ao salvar. Regras em `js/stock.js`.
+- Desenho esquemático de cada produto quando não há foto (`js/illustrations.js`).
+- Banco: `supabase/migracao-0.3.sql` (colunas `fornecedor` e `categoria`).
+
 ## Próxima etapa
 3. Avisos no celular do dono (Web Push).
 

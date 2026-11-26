@@ -57,6 +57,9 @@ insert into public.produtos(id,nome,quantidade,minimo,criado_em,atualizado_em)
   values ('11111111-1111-1111-1111-111111111111','Luva',3,4,'2026-11-26T10:00Z','2026-11-26T12:00Z')
   on conflict (id) do update set quantidade = excluded.quantidade, atualizado_em = excluded.atualizado_em;
 select quantidade = 3 as upsert_ok from public.produtos;
+-- fornecedor e categoria (versão 0.3)
+update public.produtos set fornecedor = 'Cremer', categoria = 'Insumos', atualizado_em = '2026-11-26T13:00Z';
+select fornecedor = 'Cremer' and categoria = 'Insumos' as fornecedor_ok from public.produtos;
 -- fotos
 insert into storage.objects(bucket_id, name) values ('fotos', 'a/b.jpg');
 select pg_temp.esperar_erro($$insert into storage.objects(bucket_id, name) values ('outro', 'a')$$, 'row-level security');

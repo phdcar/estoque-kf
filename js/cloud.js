@@ -89,11 +89,13 @@ export async function removeMember(userId) {
 // ---------- conversões ----------
 const toRemoteProduct = p => ({
   id: p.id, nome: p.name, quantidade: p.quantity, minimo: p.min, foto_chave: p.photoKey || null,
+  fornecedor: p.supplier || null, categoria: p.category || null,
   criado_em: p.createdAt, criado_por: p.createdBy || null, atualizado_em: p.updatedAt,
   atualizado_por: p.updatedBy || null, excluido: !!p.deleted,
 });
 const fromRemoteProduct = r => ({
   id: r.id, name: r.nome, quantity: r.quantidade, min: r.minimo, photoKey: r.foto_chave || null,
+  supplier: r.fornecedor || '', category: r.categoria || '',
   createdAt: new Date(r.criado_em).toISOString(), createdBy: r.criado_por,
   updatedAt: new Date(r.atualizado_em).toISOString(), updatedBy: r.atualizado_por, deleted: r.excluido,
 });

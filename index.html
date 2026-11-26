@@ -3,12 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Estoque Clínica KF</title>
-  <meta name="description" content="Controle de estoque da Clínica KF">
-  <meta name="theme-color" content="#0f766e">
+  <title>Estoque · Clínica KF</title>
+  <meta name="description" content="Gestão de estoque da Clínica KF">
+  <meta name="theme-color" content="#121A24">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="preload" href="fonts/jost-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -17,11 +18,15 @@
 </head>
 <body>
   <header class="top">
-    <h1>Estoque Clínica KF</h1>
+    <a class="brand" href="#painel" aria-label="Início">
+      <span class="logo" aria-hidden="true"></span>
+      <span><span class="n">Clínica KF</span><span class="s">Gestão de estoque</span></span>
+    </a>
     <div class="who" id="who"></div>
   </header>
   <main id="main"><p class="muted">Carregando…</p></main>
   <nav class="tabs hidden" id="tabs"></nav>
+  <div id="defs"></div>
   <noscript>Ative o JavaScript para usar o app.</noscript>
   <script src="js/vendor/supabase.js"></script>
   <script type="module" src="js/app.js"></script>

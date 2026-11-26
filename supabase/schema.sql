@@ -36,6 +36,9 @@ create table if not exists public.produtos (
   servidor_em    timestamptz not null default now()  -- hora do servidor (usada para baixar novidades)
 );
 create index if not exists produtos_servidor_em on public.produtos (servidor_em);
+-- versão 0.3: fornecedor e categoria (o app exige os dois ao salvar)
+alter table public.produtos add column if not exists fornecedor text;
+alter table public.produtos add column if not exists categoria  text;
 
 create table if not exists public.conferencias (
   id          uuid primary key,

@@ -1,14 +1,14 @@
 {
   "name": "Estoque Clínica KF",
   "short_name": "Estoque KF",
-  "description": "Controle de estoque da Clínica KF",
+  "description": "Gestão de estoque da Clínica KF: radar de mínimos, conferência e reposição",
   "lang": "pt-BR",
-  "start_url": "./#estoque",
+  "start_url": "./#painel",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#f4f6f7",
-  "theme_color": "#0f766e",
+  "background_color": "#121A24",
+  "theme_color": "#121A24",
   "icons": [
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
