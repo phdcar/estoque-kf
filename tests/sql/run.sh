@@ -15,6 +15,12 @@ DIR=$(cd "$(dirname "$0")" && pwd)
 $P -d t -f "$DIR/stubs.sql" >/dev/null
 $P -d t -f "$DIR/../../supabase/schema.sql" >/dev/null
 $P -d t -f "$DIR/../../supabase/schema.sql" >/dev/null   # rodar 2x não pode dar erro
+$P -d t -f "$DIR/stubs_avisos.sql" >/dev/null
+$P -d t -f "$DIR/../../supabase/avisos-email.sql" >/dev/null
+$P -d t -f "$DIR/../../supabase/avisos-email.sql" >/dev/null   # rodar 2x não pode dar erro
 OUT=$($P -d t -t -A -f "$DIR/rls_test.sql" 2>&1) || { echo "$OUT"; exit 1; }
+OUT2=$($P -d t -t -A -f "$DIR/avisos_test.sql" 2>&1) || { echo "$OUT"; echo "$OUT2"; exit 1; }
+OUT="$OUT
+$OUT2"
 if echo "$OUT" | grep -qx f; then echo "$OUT"; echo "FALHOU: alguma verificação deu falso"; exit 1; fi
 echo "SQL OK: $(echo "$OUT" | grep -cx t) verificações verdadeiras, $(echo "$OUT" | grep -c "OK (bloqueado)") bloqueios confirmados"

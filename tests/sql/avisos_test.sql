@@ -1,0 +1,88 @@
+\set ON_ERROR_STOP 1
+\set DONO '''00000000-0000-0000-0000-00000000000a'''
+create or replace function pg_temp.esperar_erro(sql text, trecho text) returns void language plpgsql as $$
+begin
+  begin execute sql; exception when others then
+    if position(trecho in sqlerrm) = 0 then raise exception 'erro diferente: % (esperado %)', sqlerrm, trecho; end if;
+    raise notice 'OK (bloqueado): %', trecho; return;
+  end;
+  raise exception 'deveria ter falhado: %', sql;
+end $$;
+grant execute on function pg_temp.esperar_erro(text, text) to authenticated;
+update public.kf_avisos set email = 'dono@teste.kf';
+-- sem a chave: não envia, registra o motivo, e o estoque é salvo normalmente
+set role authenticated;
+select set_config('request.jwt.claim.sub', :DONO, false);
+insert into public.produtos(id,nome,quantidade,minimo,criado_em,atualizado_em,atualizado_por)
+  values ('22222222-0000-0000-0000-000000000001','Agulha 31G',10,5,now(),'2026-11-27T10:00Z','Carlos');
+reset role;
+select (select count(*) from net.chamadas) = 0 as sem_chave_nao_envia;
+select (select erro from public.kf_avisos_log order by id desc limit 1) like 'falta o segredo%' as sem_chave_registra;
+select (select count(*) from public.produtos where nome = 'Agulha 31G') = 1 as sem_chave_salva;
+insert into vault.decrypted_secrets values ('resend_api_key', 're_teste');
+-- envio do app com 3 produtos novos de uma vez = 1 e-mail
+set role authenticated;
+select set_config('request.jwt.claim.sub', :DONO, false);
+insert into public.produtos(id,nome,quantidade,minimo,criado_em,atualizado_em,atualizado_por,fornecedor) values
+  ('22222222-0000-0000-0000-000000000002','Gaze',3,10,now(),'2026-11-27T10:00Z','Bruna','Cremer'),
+  ('22222222-0000-0000-0000-000000000003','Luva XP',8,4,now(),'2026-11-27T10:00Z','Bruna','Cremer'),
+  ('22222222-0000-0000-0000-000000000004','Cotonete',1,1,now(),'2026-11-27T10:00Z','Bruna',null)
+  on conflict (id) do update set quantidade = excluded.quantidade, atualizado_em = excluded.atualizado_em;
+reset role;
+select count(*) = 1 as tres_novos_um_email from net.chamadas;
+select body->>'subject' = 'Estoque KF · 3 produtos alterados (Bruna) · 1 abaixo do mínimo' as assunto_novos,
+       body->'to'->>0 = 'dono@teste.kf' as destino_ok, headers->>'Authorization' = 'Bearer re_teste' as chave_ok,
+       url = 'https://api.resend.com/emails' as url_ok
+  from net.chamadas order by id desc limit 1;
+-- quantidade baixou e ficou abaixo do mínimo
+set role authenticated;
+select set_config('request.jwt.claim.sub', :DONO, false);
+update public.produtos set quantidade = 4, atualizado_em = '2026-11-27T11:00Z', atualizado_por = 'Bruna' where nome = 'Agulha 31G';
+reset role;
+select body->>'subject' = 'Estoque KF · Agulha 31G: 10 → 4 (Bruna) · 1 abaixo do mínimo' as assunto_baixou,
+       position('ABAIXO DO MÍNIMO' in body->>'html') > 0 as html_marca_vermelho
+  from net.chamadas order by id desc limit 1;
+select count(*) = 2 as dois_emails_ate_aqui from net.chamadas;
+-- alteração antiga (ignorada pela regra "a mais recente vence") não gera e-mail
+set role authenticated;
+select set_config('request.jwt.claim.sub', :DONO, false);
+update public.produtos set quantidade = 99, atualizado_em = '2026-11-27T09:00Z' where nome = 'Agulha 31G';
+-- só a data mudou (nada no estoque): sem e-mail
+update public.produtos set atualizado_em = '2026-11-27T12:00Z' where nome = 'Luva XP';
+reset role;
+select count(*) = 2 as sem_email_sem_mudanca from net.chamadas;
+-- conferência mexe em vários produtos num envio só: 1 e-mail de produtos + 1 da conferência
+set role authenticated;
+select set_config('request.jwt.claim.sub', :DONO, false);
+insert into public.produtos(id,nome,quantidade,minimo,criado_em,atualizado_em,atualizado_por) values
+  ('22222222-0000-0000-0000-000000000002','Gaze',12,10,now(),'2026-11-27T13:00Z','Bruna'),
+  ('22222222-0000-0000-0000-000000000003','Luva XP',8,4,now(),'2026-11-27T13:00Z','Bruna'),
+  ('22222222-0000-0000-0000-000000000004','Cotonete',0,1,now(),'2026-11-27T13:00Z','Bruna')
+  on conflict (id) do update set quantidade = excluded.quantidade, atualizado_em = excluded.atualizado_em, atualizado_por = excluded.atualizado_por;
+insert into public.conferencias(id, dia, feita_em, por_nome, por_papel, por_user, itens) values
+  (gen_random_uuid(), '2026-11-27', '2026-11-27T13:00Z', 'Bruna', 'funcionario', :DONO,
+   '[{"name":"Gaze","before":3,"counted":12},{"name":"Luva XP","before":8,"counted":8},{"name":"Cotonete","before":1,"counted":0}]');
+reset role;
+select count(*) = 4 as conferencia_dois_emails from net.chamadas;
+select (select body->>'subject' from net.chamadas where id = (select max(id) - 1 from net.chamadas))
+       = 'Estoque KF · 2 produtos alterados (Bruna) · 1 abaixo do mínimo' as assunto_conferencia_produtos;
+select body->>'subject' = 'Estoque KF · Conferência feita por Bruna (3 produtos, 2 com diferença)' as assunto_conferencia
+  from net.chamadas order by id desc limit 1;
+-- exclusão
+set role authenticated;
+select set_config('request.jwt.claim.sub', :DONO, false);
+update public.produtos set excluido = true, atualizado_em = '2026-11-27T14:00Z', atualizado_por = 'Carlos' where nome = 'Luva XP';
+reset role;
+select body->>'subject' = 'Estoque KF · Luva XP: excluído (Carlos)' as assunto_excluido from net.chamadas order by id desc limit 1;
+-- o app não enxerga a configuração nem o registro
+set role authenticated;
+select pg_temp.esperar_erro($$select * from public.kf_avisos$$, 'permission denied');
+select pg_temp.esperar_erro($$select public.kf_enviar_email('x','y')$$, 'permission denied');
+reset role;
+-- desligado: não envia
+update public.kf_avisos set ligado = false;
+set role authenticated;
+select set_config('request.jwt.claim.sub', :DONO, false);
+update public.produtos set quantidade = 7, atualizado_em = '2026-11-27T15:00Z' where nome = 'Gaze';
+reset role;
+select count(*) = 5 as desligado_nao_envia from net.chamadas;
