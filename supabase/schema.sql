@@ -150,7 +150,7 @@ alter table public.config       enable row level security;
 alter table public.produtos     enable row level security;
 alter table public.conferencias enable row level security;
 
-revoke all on public.membros, public.config, public.produtos, public.conferencias from anon;
+revoke all on public.membros, public.config, public.produtos, public.conferencias from anon, authenticated;
 grant select on public.membros to authenticated;
 grant select, update on public.config to authenticated;
 grant select, insert, update on public.produtos to authenticated;
