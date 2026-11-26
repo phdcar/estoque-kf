@@ -1,5 +1,5 @@
 // Service worker: guarda os arquivos do app para abrir sem internet.
-const VERSION = 'kf-estoque-v0.5.0';
+const VERSION = 'kf-estoque-v0.5.1';
 const ASSETS = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/app.js', 'js/ambient.js', 'js/db.js', 'js/stock.js', 'js/illustrations.js', 'js/icons.js', 'js/lineart.js', 'js/schedule.js', 'js/cloud.js', 'js/config.js',

@@ -7,7 +7,7 @@ import { I } from './icons.js';
 import * as cloud from './cloud.js';
 import { startAmbient, skyState, PERIOD_NAME, tapURI } from './ambient.js';
 
-export const APP_VERSION = '0.5.0';
+export const APP_VERSION = '0.5.1';
 export { isLow };
 
 // ---------- utilidades ----------
@@ -625,7 +625,7 @@ async function viewForm(id) {
       <div id="err" class="banner red hidden" role="alert" style="margin:14px 0 0"></div>
       <p style="margin-top:16px"><button class="block" type="submit" id="save">Salvar</button></p>
     </form>`;
-  $('#nd').onchange = () => { $('#vl').disabled = $('#nd').checked; if ($('#nd').checked) $('#vl').value = ''; };
+  $('#nd').onchange = () => { $('#vl').disabled = $('#nd').checked; if ($('#nd').checked) $('#vl').value = ''; $('#vl').dispatchEvent(new Event('input')); };
   $('#cam').onclick = () => $('#f-cam').click();
   $('#gal').onclick = () => $('#f-gal').click();
   const onFile = async e => {
@@ -957,6 +957,21 @@ function syncText(st) {
   if (st.status === 'ok') return 'Tudo sincronizado.';
   return '';
 }
+
+// Campos de data: o iPhone mostra a data no idioma da região do aparelho (ex.: "Nov 26, 2026").
+// Por cima do campo nativo mostramos sempre DD/MM/AAAA em português; o toque continua abrindo o seletor do iOS.
+const fmtBR = v => /^\d{4}-\d{2}-\d{2}$/.test(v) ? v.split('-').reverse().join('/') : '';
+function enhanceDates(root = document) {
+  for (const el of root.querySelectorAll('input[type=date]:not([data-br])')) {
+    el.dataset.br = '1';
+    const w = document.createElement('span'); w.className = 'dwrap';
+    const t = document.createElement('span'); t.className = 'dtext'; t.setAttribute('aria-hidden', 'true');
+    el.replaceWith(w); w.append(el, t);
+    const up = () => { const f = fmtBR(el.value); t.textContent = f || 'dd/mm/aaaa'; t.classList.toggle('empty', !f); w.classList.toggle('off', el.disabled); };
+    el.addEventListener('input', up); el.addEventListener('change', up); up();
+  }
+}
+new MutationObserver(() => enhanceDates()).observe(document.body, { childList: true, subtree: true });
 
 function renderSyncBadge() {
   const el = $('#sync');

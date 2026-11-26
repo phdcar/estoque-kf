@@ -440,3 +440,14 @@ label.nd:has(input:checked) { border-color: rgba(205,178,126,.7); background: rg
 .qty .qv .of { display: block; width: 100%; text-align: center; margin-top: 2px; white-space: nowrap; }
 textarea { font: inherit; font-size: 16px; width: 100%; padding: 12px 14px; border-radius: 12px; resize: vertical; min-height: 96px; }
 textarea:focus { outline: 2px solid var(--gold); outline-offset: 0; border-color: var(--gold); }
+
+/* Datas e horários: no iPhone o campo nativo ignora width e vaza do cartão */
+input[type=date], input[type=time] { -webkit-appearance: none; appearance: none; display: block; box-sizing: border-box; min-width: 0; max-width: 100%; text-align: center; }
+input[type=date]::-webkit-date-and-time-value, input[type=time]::-webkit-date-and-time-value { text-align: center; margin: 0; }
+.dwrap { position: relative; display: block; min-width: 0; }
+.dwrap input[type=date] { width: 100%; color: transparent; -webkit-text-fill-color: transparent; }
+.dwrap input[type=date]::-webkit-datetime-edit { color: transparent; }
+.dtext { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; font-size: 17px; color: var(--ivory); font-variant-numeric: tabular-nums; letter-spacing: .3px; }
+.dtext.empty { color: rgba(243,239,231,.38); }
+.dwrap.off .dtext { opacity: .35; }
+.vrow > .dwrap { flex: 1.6; }
