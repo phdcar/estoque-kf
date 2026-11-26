@@ -432,14 +432,11 @@ try {
     await page.waitForSelector('table.hist');
     const rows = await page.$$eval('table.hist:first-of-type tbody tr', trs => trs.map(tr => [...tr.children].map(td => td.innerText.replace(/\s+/g, ' ').trim())));
     assert.equal(rows[0][0].startsWith('01/12/2026'), true);
-    assert.equal(rows[0][1], 'Feita');
-    assert.match(rows[0][2], /Bruna 01\/12\/2026/);
+    assert.match(rows[0][1], /^Feita Bruna 01\/12\/2026/);
     assert.equal(rows[1][0].startsWith('30/11/2026'), true);
-    assert.equal(rows[1][1], 'Justificada');
-    assert.match(rows[1][2], /Bruna: “Faltei por motivo de saúde.”/);
+    assert.match(rows[1][1], /^Justificada Bruna: “Faltei por motivo de saúde.”/);
     assert.equal(rows[2][0].startsWith('27/11/2026'), true);
-    assert.equal(rows[2][1], 'Feita');
-    assert.match(rows[2][2], /Bruna 27\/11\/2026/);
+    assert.match(rows[2][1], /^Feita Bruna 27\/11\/2026/);
     assert.equal(rows[3][1], 'Sem cobrança (produtos novos)');
     const j = fake.tables.conferencias.find(c => c.justificativa);
     assert.deepEqual([j.justificativa, j.dias], ['Faltei por motivo de saúde.', ['2026-11-30']]);
@@ -503,6 +500,25 @@ try {
     await nav(op, '#produto/' + gz);
     assert.match(await op.textContent('#f-vl'), /20\/12\/2026 · Vence em \d+ dias/);
     await shot(op, '15-produto-validade');
+  });
+
+  await step('revisão visual: todas as telas no tamanho do iPhone (390x844)', async () => {
+    mkdirSync(path.join(SHOTS, 'qa'), { recursive: true });
+    const id = fake.tables.produtos.find(p => p.nome === 'Álcool 70% 1L').id;
+    const screens = [['dono', op, ['#painel', '#estoque', '#estoque/alerta', '#produto/' + id, '#editar/' + id, '#novo', '#conferencia', '#historico', '#ajustes']],
+      ['func', page, ['#painel', '#estoque', '#conferencia', '#ajustes']]];
+    for (const [who, pg, routes] of screens) {
+      await pg.setViewportSize({ width: 390, height: 844 });
+      for (const r of routes) {
+        await nav(pg, r);
+        await pg.waitForTimeout(900);
+        // nada pode passar da largura da tela
+        const over = await pg.evaluate(() => [...document.querySelectorAll('main *')].filter(e => { if (e.closest('.face-tap, .chips, .hscroll')) return false; const b = e.getBoundingClientRect(); return b.width && (b.right > innerWidth + 1 || b.left < -1); }).slice(0, 5).map(e => e.tagName + '.' + e.className + '#' + e.id));
+        assert.deepEqual(over, [], `${who} ${r}: elementos passando da tela`);
+        if (r.startsWith('#editar')) { await pg.evaluate(() => document.querySelector('.vrow').scrollIntoView({ block: 'center' })); await pg.waitForTimeout(300); await pg.screenshot({ path: path.join(SHOTS, 'qa', 'vrow.png') }); }
+        await pg.screenshot({ path: path.join(SHOTS, 'qa', `${who}-${r.slice(1).replace(/\//g, '_').slice(0, 20)}.png`), fullPage: true });
+      }
+    }
   });
 
   await step('dono tira o acesso do funcionário', async () => {

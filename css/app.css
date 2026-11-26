@@ -57,7 +57,7 @@ a { color: inherit; }
 @keyframes shP { 0% { transform: translateX(242%); } 55%, 100% { transform: translateX(-22%); } }
 @media (prefers-reduced-motion: reduce) { .shB, .shP { animation: none; } .tap-shine, .face-tap .shB { display: none; } }
 body { position: relative; }
-#ver { position: absolute; z-index: 5; right: 16px; top: calc(70px + var(--safe-t)); font-size: 10.5px; letter-spacing: .8px; color: var(--mute); opacity: .7; pointer-events: none; white-space: nowrap; }
+#ver { display: block; max-width: 760px; margin: 0 auto; padding: 12px 16px 0; text-align: right; font-size: 10.5px; letter-spacing: .8px; color: var(--mute); opacity: .7; pointer-events: none; white-space: nowrap; line-height: 1; }
 
 /* ornamento: fio dourado com losango */
 .orn { display: flex; align-items: center; gap: 10px; margin: 14px 0 2px; max-width: 220px; }
@@ -483,4 +483,73 @@ nav.tabs a svg { position: relative; }
 
 @media (prefers-reduced-motion: reduce) {
   main.enter > * { animation: none; }
+}
+
+/* =====================================================================
+   v0.6.2: mais respiro e melhor distribuição no iPhone
+   ===================================================================== */
+main { padding: 14px 18px calc(120px + var(--safe-b)); }
+main:has(.fab) { padding-bottom: calc(170px + var(--safe-b)); }
+.banner { margin-bottom: 14px; padding: 14px 16px; border-radius: 16px; line-height: 1.4; }
+.banner + :not(.banner) { margin-top: 26px; }
+.eyebrow { display: block; margin-bottom: 2px; }
+h2 { margin: 4px 0 8px; }
+h2 + .card, h2 + ul.list, .lead + .card, .lead + ul.list { margin-top: 18px; }
+.lead { margin-bottom: 20px; }
+.back { margin-bottom: 14px; }
+h3 { margin: 40px 0 16px; }
+.card { margin-bottom: 16px; padding: 20px; }
+.chips { gap: 10px; padding-top: 6px; padding-bottom: 16px; margin-top: 14px; }
+.chip { padding: 7px 16px; min-height: 38px; }
+ul.list { display: grid; gap: 14px; }
+ul.list > li { margin: 0 !important; }
+li.prod { padding: 14px; gap: 14px; }
+.hello { margin: 6px 0 24px; }
+
+/* radar: no celular, o radar fica em cima (maior) e os números embaixo em duas colunas */
+@media (max-width: 560px) {
+  .radar-card { grid-template-columns: 1fr; justify-items: center; gap: 22px; padding: 24px 20px; }
+  .radar-card .radar { width: min(62vw, 230px); height: auto; aspect-ratio: 1; }
+  .radar-card .radar .ctr b { font-size: 44px; }
+  .radar-card .kpis { width: 100%; grid-template-columns: 1fr 1fr; column-gap: 18px; row-gap: 12px; }
+  .radar-card .kpi { border-bottom: 1px solid rgba(243,239,231,.1); padding-bottom: 10px; align-items: center; }
+  .radar-card .kpi:last-child { grid-column: 1 / -1; border-bottom: 0; padding-bottom: 0; }
+  .radar-card .kpi span { font-size: 13px; line-height: 1.25; }
+}
+
+/* validade + ND: "sem validade" embaixo do ND, sem apertar */
+.vrow { gap: 12px; }
+.vrow > .dwrap { flex: 1 1 auto; min-width: 0; }
+label.nd { flex: 0 0 auto; display: grid; grid-template-columns: auto auto; column-gap: 10px; row-gap: 0; align-content: center; padding: 6px 14px; }
+label.nd input { grid-row: 1 / span 2; align-self: center; }
+label.nd small { white-space: nowrap; }
+
+/* histórico por dia: duas colunas (dia | situação e quem) */
+table.hist.days td { padding: 14px 6px; }
+table.hist.days td:first-child { width: 42%; }
+table.hist.days b.st { font-weight: 600; }
+table.hist.days .who-when { display: inline-block; margin-top: 4px; color: #E9E3D8; }
+
+/* barra de abas mais arejada */
+nav.tabs a { padding: 10px 2px 12px; gap: 5px; font-size: 11px; }
+nav.tabs a::after { top: 6px; }
+
+/* produto na lista (celular): nome com a largura toda; situação e − / + numa segunda linha */
+@media (max-width: 560px) {
+  li.prod { grid-template-columns: 58px 1fr auto; grid-template-areas: "th nm nm" "th mt mt" "lv lv qt"; row-gap: 4px; column-gap: 14px; align-items: center; padding: 14px 14px 12px; }
+  li.prod > a:not(.name) { grid-area: th; align-self: start; }
+  li.prod .info { display: contents; }
+  li.prod .name { grid-area: nm; font-size: 16px; align-self: end; }
+  li.prod .meta { grid-area: mt; margin-top: 0; align-self: start; }
+  li.prod .level { grid-area: lv; margin-top: 8px; padding-top: 10px; border-top: 1px solid rgba(243,239,231,.08); align-self: stretch; }
+  li.prod .qty { grid-area: qt; margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(243,239,231,.08); }
+  .bar { max-width: 90px; }
+}
+/* radar no celular: números numa coluna só, sem quebrar o texto */
+@media (max-width: 560px) {
+  .radar-card .kpis { grid-template-columns: 1fr; row-gap: 8px; }
+  .radar-card .kpi { padding-bottom: 8px; }
+  .radar-card .kpi:last-child { grid-column: auto; }
+  .radar-card .kpi span { font-size: 14px; white-space: nowrap; }
+  .radar-card .kpi b { font-size: 24px; }
 }

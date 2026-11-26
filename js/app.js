@@ -7,7 +7,7 @@ import { I } from './icons.js';
 import * as cloud from './cloud.js';
 import { startAmbient, skyState, PERIOD_NAME, tapURI } from './ambient.js';
 
-export const APP_VERSION = '0.6.1';
+export const APP_VERSION = '0.6.2';
 export { isLow };
 
 // ---------- utilidades ----------
@@ -837,11 +837,10 @@ async function viewHistory() {
     <h2>Conferências</h2>
     <div class="card small">Conferência diária, de segunda a sexta-feira, desde ${S.schedule ? fmtDay(S.schedule.startDate) : '—'}. Prazo: ${esc(S.schedule?.deadline || '18:00')}. Dia útil sem conferência precisa de justificativa.</div>
     <h3>Por dia útil</h3>
-    ${rows.length ? `<div class="card" style="padding:4px 12px"><table class="hist"><thead><tr><th>Dia</th><th>Situação</th><th>Quem e quando</th></tr></thead><tbody>
+    ${rows.length ? `<div class="card" style="padding:4px 12px"><table class="hist days"><tbody>
       ${rows.map(r => `<tr><td>${fmtDay(r.day)}<br><span class="muted small">${cap(weekday(r.day))}</span></td>
-        <td class="st ${label[r.state][1]}">${label[r.state][0]}</td>
-        <td>${r.count ? `${esc(r.count.by)}<br><span class="muted small">${fmtDateTime(r.count.at)}</span>`
-          : r.justification ? `${esc(r.justification.by)}: “${esc(r.justification.justification)}”<br><span class="muted small">${fmtDateTime(r.justification.at)}</span>` : '—'}</td></tr>`).join('')}
+        <td><b class="st ${label[r.state][1]}">${label[r.state][0]}</b><br><span class="who-when">${r.count ? `${esc(r.count.by)}<br><span class="muted small">${fmtDateTime(r.count.at)}</span>`
+          : r.justification ? `${esc(r.justification.by)}: “${esc(r.justification.justification)}”<br><span class="muted small">${fmtDateTime(r.justification.at)}</span>` : ''}</span></td></tr>`).join('')}
     </tbody></table></div>` : `<p class="muted">Ainda não houve dia de conferência.</p>`}
     ${justs.length ? `<h3>Justificativas</h3>${justs.map(c => `
       <div class="card"><b>${esc(c.by)}</b> <span class="muted small">· ${fmtDateTime(c.at)}</span>
