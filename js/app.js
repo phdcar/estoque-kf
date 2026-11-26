@@ -1,13 +1,13 @@
 import { db } from './db.js';
 import { processPhoto } from './lineart.js';
-import { ymd, countStatus, history, isWeekday } from './schedule.js';
+import { ymd, countStatus, history, isWeekday, sinceLastCount } from './schedule.js';
 import { level, isLow, missing, need, shoppingList, shoppingText, summary, buy, sentenceCase, expiryLevel, expiryText, daysToExpiry, EXPIRY_SOON, NO_EXPIRY } from './stock.js';
 import { illustrationFor, SKETCH_FILTER } from './illustrations.js';
 import { I } from './icons.js';
 import * as cloud from './cloud.js';
 import { startAmbient, skyState, PERIOD_NAME, tapURI } from './ambient.js';
 
-export const APP_VERSION = '0.6.2';
+export const APP_VERSION = '0.6.3';
 export { isLow };
 
 // ---------- utilidades ----------
@@ -413,6 +413,17 @@ function radarSvg(products) {
   </svg>`;
 }
 
+// aviso em cima do radar: conferido hoje ou há quantos dias úteis não se confere
+function sinceStrip() {
+  if (!S.products.length) return '';
+  const st = sinceLastCount({ now: now(), counts: S.counts, deadline: S.schedule?.deadline });
+  const lastTxt = l => `Última conferência: ${cap(weekday(l.date))}, ${fmtDay(l.date).slice(0, 5)} · ${esc(l.by)}`;
+  if (!st.last) return `<div class="since amber"><span class="ic">${I.alert}</span><div><strong>Estoque ainda não foi conferido</strong><small>A primeira conferência aparece aqui.</small></div></div>`;
+  if (st.today) return `<div class="since ok"><span class="ic">${I.ok}</span><div><strong>Estoque conferido hoje</strong><small>${fmtTime(st.last.at)} · ${esc(st.last.by)}</small></div></div>`;
+  if (!st.days) return `<div class="since gold"><span class="ic">${I.clock}</span><div><strong>${st.pendingToday ? 'Conferência de hoje pendente' : 'Fim de semana, sem conferência'}</strong><small>${lastTxt(st.last)}</small></div></div>`;
+  return `<div class="since ${st.days >= 2 ? 'red' : 'amber'}"><b class="n">${st.days}</b><div><strong>${st.days === 1 ? 'dia útil' : 'dias úteis'} sem conferir o estoque</strong><small>${lastTxt(st.last)}</small></div></div>`;
+}
+
 // ---------- tela: painel (radar) ----------
 async function viewDashboard() {
   const sm = summary(S.products, now());
@@ -435,6 +446,7 @@ async function viewDashboard() {
     ${countBanner()}
     <section class="radar-card" aria-label="Radar de estoque">
       <div class="face-tap" aria-hidden="true"><div class="shB"><div class="shP"></div></div></div>
+      ${sinceStrip()}
       <div class="radar ${sm.alerta ? 'alert' : ''}">${radarSvg(S.products)}
         <div class="ctr"><b id="radar-n">${sm.alerta}</b><span>Em alerta</span></div></div>
       <div class="kpis">

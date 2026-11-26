@@ -105,3 +105,19 @@ export function history({ now, start, deadline, counts, productDays, limit = 30 
   }
   return rows;
 }
+
+// Há quantos dias úteis o estoque não é conferido (para o aviso em cima do radar).
+// Conta os dias úteis depois da última contagem até ontem; hoje entra só depois do prazo.
+// Justificativa não conta como conferência.
+export function sinceLastCount({ now, counts, deadline }) {
+  const today = ymd(now);
+  const last = counts.filter(c => !c.justification).sort((a, b) => b.date.localeCompare(a.date) || b.at.localeCompare(a.at))[0] || null;
+  const [hh, mm] = (deadline || '18:00').split(':').map(Number);
+  const past = now.getHours() * 60 + now.getMinutes() >= hh * 60 + mm;
+  if (!last) return { last: null, days: null, today: false };
+  if (last.date >= today) return { last, days: 0, today: true };
+  let days = 0;
+  for (let d = addDays(last.date, 1); d < today; d = addDays(d, 1)) if (isWeekday(d)) days++;
+  if (isWeekday(today) && past) days++;
+  return { last, days, today: false, pendingToday: isWeekday(today) && !past };
+}

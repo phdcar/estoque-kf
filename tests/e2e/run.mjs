@@ -479,6 +479,8 @@ try {
     assert.equal(await op.locator('#alist li.prod .ping').count(), 1);
     assert.match(await op.textContent('#shop'), /Mercado Livre.*Agulha 31G.*comprar 2/s);
     await op.waitForFunction(() => document.querySelectorAll('.radar .blip').length >= 1);
+    assert.match(await op.textContent('.radar-card .since'), /dia útil sem conferir o estoque|Estoque conferido hoje|Conferência de hoje pendente/);
+    console.log('       aviso do radar:', (await op.textContent('.radar-card .since')).replace(/\s+/g, ' ').trim());
     await shot(op, '11-painel-radar');
     await nav(op, '#estoque/alerta');
     assert.deepEqual(await op.$$eval('#plist li.prod .name', els => els.map(e => e.textContent)), ['Agulha 31G']);
@@ -519,6 +521,17 @@ try {
         await pg.screenshot({ path: path.join(SHOTS, 'qa', `${who}-${r.slice(1).replace(/\//g, '_').slice(0, 20)}.png`), fullPage: true });
       }
     }
+  });
+
+  await step('aviso do radar: 3 dias úteis sem conferir fica vermelho', async () => {
+    const before = await op.evaluate(() => Date.now());
+    await setTime(op, '2026-12-04T19:00:00-03:00'); // sexta depois do prazo; última contagem 01/12 (terça)
+    await nav(op, '#painel');
+    await op.waitForFunction(() => document.querySelector('.since')?.classList.contains('red'));
+    assert.match(await op.textContent('.since .n'), /^3$/);
+    await op.waitForTimeout(700);
+    await op.screenshot({ path: path.join(SHOTS, 'qa', 'radar-3-dias.png'), clip: { x: 0, y: 0, width: 390, height: 844 } });
+    await setTime(op, new Date(before).toISOString());
   });
 
   await step('dono tira o acesso do funcionário', async () => {

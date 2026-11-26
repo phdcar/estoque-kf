@@ -76,3 +76,21 @@ test('histórico: feita, justificada, não feita, sem cobrança; pula fim de sem
   ]);
   assert.equal(rows[3].justification.justification, 'Fiquei doente');
 });
+
+test('dias úteis sem conferência (aviso do radar)', async () => {
+  const { sinceLastCount } = await import('../../js/schedule.js');
+  const base = { deadline: '18:00' };
+  assert.equal(sinceLastCount({ ...base, now: at('2026-11-26T09:00:00'), counts: [] }).days, null);
+  assert.deepEqual(sinceLastCount({ ...base, now: at('2026-11-26T19:00:00'), counts: [c('2026-11-26')] }).days, 0);
+  // contou segunda; quarta de manhã: só terça perdida
+  let s = sinceLastCount({ ...base, now: at('2026-11-25T09:00:00'), counts: [c('2026-11-23')] });
+  assert.equal(s.days, 1); assert.equal(s.pendingToday, true);
+  // quarta depois do prazo: 2
+  assert.equal(sinceLastCount({ ...base, now: at('2026-11-25T18:30:00'), counts: [c('2026-11-23')] }).days, 2);
+  // contou sexta; segunda de manhã: fim de semana não conta
+  assert.equal(sinceLastCount({ ...base, now: at('2026-11-30T09:00:00'), counts: [c('2026-11-27')] }).days, 0);
+  // contou quarta; terça seguinte depois do prazo: qui, sex, seg, ter = 4
+  assert.equal(sinceLastCount({ ...base, now: at('2026-12-01T19:00:00'), counts: [c('2026-11-25')] }).days, 4);
+  // justificativa não conta como conferência
+  assert.equal(sinceLastCount({ ...base, now: at('2026-11-25T19:00:00'), counts: [c('2026-11-23'), j('2026-11-25', ['2026-11-24'])] }).days, 2);
+});
