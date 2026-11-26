@@ -88,14 +88,14 @@ export async function removeMember(userId) {
 
 // ---------- conversões ----------
 const toRemoteProduct = p => ({
-  id: p.id, nome: p.name, quantidade: p.quantity, minimo: p.min, foto_chave: p.photoKey || null,
-  fornecedor: p.supplier || null, categoria: p.category || null,
+  id: p.id, nome: p.name, quantidade: p.quantity, minimo: p.min, ideal: Number(p.ideal) >= 1 ? Number(p.ideal) : null, foto_chave: p.photoKey || null,
+  fornecedor: p.supplier || null, categoria: p.category || null, validade: /^\d{4}-/.test(p.expiry || '') ? p.expiry : null, sem_validade: p.expiry === 'ND',
   criado_em: p.createdAt, criado_por: p.createdBy || null, atualizado_em: p.updatedAt,
   atualizado_por: p.updatedBy || null, excluido: !!p.deleted,
 });
 const fromRemoteProduct = r => ({
-  id: r.id, name: r.nome, quantity: r.quantidade, min: r.minimo, photoKey: r.foto_chave || null,
-  supplier: r.fornecedor || '', category: r.categoria || '',
+  id: r.id, name: r.nome, quantity: r.quantidade, min: r.minimo, ideal: r.ideal ?? null, photoKey: r.foto_chave || null,
+  supplier: r.fornecedor || '', category: r.categoria || '', expiry: r.sem_validade ? 'ND' : (r.validade ? String(r.validade).slice(0, 10) : ''),
   createdAt: new Date(r.criado_em).toISOString(), createdBy: r.criado_por,
   updatedAt: new Date(r.atualizado_em).toISOString(), updatedBy: r.atualizado_por, deleted: r.excluido,
 });

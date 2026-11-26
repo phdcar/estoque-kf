@@ -69,13 +69,14 @@ async function signup(page, { name, email, code }) {
 }
 const setTime = async (page, iso) => { await page.clock.setSystemTime(new Date(iso)); await page.reload(); await page.waitForFunction(() => !!window.__app); await page.evaluate(() => window.__app.idle()); };
 
-async function addProduct(page, { name, qty, min, file, supplier }) {
+async function addProduct(page, { name, qty, min, file, supplier, expiry = 'ND' }) {
   await nav(page, '#novo');
   await page.fill('#nm', name);
   await page.fill('#ct', 'Insumos');
   await page.fill('#fn', supplier || 'Cremer');
   await page.fill('#qt', String(qty));
   await page.fill('#mn', String(min));
+  if (expiry === 'ND') await page.check('#nd'); else await page.fill('#vl', expiry);
   const t0 = Date.now();
   await page.setInputFiles('#f-gal', path.join(FIX, file));
   await page.waitForSelector('#pv:not(.hidden)');
@@ -165,6 +166,12 @@ try {
     await page.fill('#mn', '0');
     await page.click('#save');
     assert.match(await page.textContent('#err'), /mínimo/);
+    await page.fill('#mn', '1');
+    await page.click('#save');
+    assert.match(await page.textContent('#err'), /validade ou marque ND/);
+    await page.check('#nd');
+    assert.equal(await page.$eval('#vl', el => el.disabled), true);
+    await page.uncheck('#nd');
     assert.ok(page.url().includes('#novo'), 'não pode salvar com campo faltando');
   });
 
@@ -193,12 +200,12 @@ try {
   });
 
   await step('foto de celular "em pé" (EXIF) sai na orientação certa', async () => {
-    r2 = await addProduct(page, { name: 'Álcool 70% 1L', qty: 3, min: 5, file: 'produto-exif6.jpg', supplier: 'Farmácia' });
+    r2 = await addProduct(page, { name: 'Álcool 70% 1L', qty: 3, min: 5, file: 'produto-exif6.jpg', supplier: 'Farmácia', expiry: '2026-12-20' });
     assert.deepEqual(r2.dims, { lw: 800, lh: 600, ow: 1200, oh: 900 });
   });
 
   await step('foto grande (12 MP, 4032x3024) é processada', async () => {
-    r3 = await addProduct(page, { name: 'Gaze estéril', qty: 20, min: 10, file: 'produto-grande.jpg' });
+    r3 = await addProduct(page, { name: 'Gaze estéril', qty: 20, min: 10, file: 'produto-grande.jpg', expiry: '2027-06-30' });
     assert.deepEqual(r3.dims, { lw: 800, lh: 600, ow: 1600, oh: 1200 });
     console.log('        tempo de conversão (12 MP, Chromium no servidor):', r3.ms, 'ms');
   });
@@ -218,7 +225,7 @@ try {
     assert.deepEqual(low, ['Álcool 70% 1L']);
     assert.match(await page.textContent('#low-banner'), /1 produto abaixo do mínimo: Álcool 70% 1L/);
     const bg = await page.$eval('li.prod.low', el => getComputedStyle(el).borderColor);
-    assert.equal(bg, 'rgb(179, 38, 30)');
+    assert.equal(bg, 'rgb(224, 121, 111)');
     // vermelho vem primeiro na lista
     assert.equal(await page.$eval('#plist li', el => el.textContent.includes('Álcool')), true);
     await page.waitForFunction(() => [...document.querySelectorAll('img.thumb')].every(i => i.naturalWidth > 0));
@@ -439,6 +446,7 @@ try {
     await op.fill('#fn', 'Mercado Livre');
     await op.fill('#qt', '0');
     await op.fill('#mn', '2');
+    await op.check('#nd');
     await op.click('#save');
     await waitHash(op, '#produto/');
     await op.waitForSelector('.hero svg.ill');
@@ -448,6 +456,9 @@ try {
     const row = fake.tables.produtos.find(p => p.nome === 'AGULHA 31G');
     assert.equal(row.fornecedor, 'Mercado Livre');
     assert.equal(row.categoria, 'Insumos');
+    assert.equal(row.sem_validade, true);
+    assert.equal(row.validade, null);
+    assert.equal(fake.tables.produtos.find(p => p.nome === 'Álcool 70% 1L').validade, '2026-12-20');
     await nav(op, '#painel');
     assert.equal(await op.textContent('#radar-n'), '1');
     assert.deepEqual(await op.$$eval('#alist li.prod .name', els => els.map(e => e.textContent)), ['AGULHA 31G']);
@@ -458,6 +469,23 @@ try {
     await nav(op, '#estoque/alerta');
     assert.deepEqual(await op.$$eval('#plist li.prod .name', els => els.map(e => e.textContent)), ['AGULHA 31G']);
     await shot(op, '12-estoque-filtro-alerta');
+  });
+
+  await step('validade: radar de vencimento, filtro e ND', async () => {
+    await nav(op, '#painel');
+    assert.deepEqual(await op.$$eval('#elist li.prod .name', els => els.map(e => e.textContent)), ['Álcool 70% 1L']);
+    assert.match(await op.textContent('#elist .pill.exp'), /Vence em \d+ dias/);
+    await op.waitForFunction(() => [...document.querySelectorAll('img.thumb')].every(i => i.naturalWidth > 0));
+    await shot(op, '14-painel-validade');
+    await nav(op, '#estoque/validade');
+    assert.deepEqual(await op.$$eval('#plist li.prod .name', els => els.map(e => e.textContent)), ['Álcool 70% 1L']);
+    const ag = fake.tables.produtos.find(p => p.nome === 'AGULHA 31G').id;
+    await nav(op, '#produto/' + ag);
+    assert.equal(await op.textContent('#f-vl'), 'ND · sem validade');
+    const gz = fake.tables.produtos.find(p => p.nome === 'Álcool 70% 1L').id;
+    await nav(op, '#produto/' + gz);
+    assert.match(await op.textContent('#f-vl'), /20\/12\/2026 · Vence em \d+ dias/);
+    await shot(op, '15-produto-validade');
   });
 
   await step('dono tira o acesso do funcionário', async () => {

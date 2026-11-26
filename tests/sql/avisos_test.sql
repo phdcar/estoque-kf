@@ -86,3 +86,24 @@ select set_config('request.jwt.claim.sub', :DONO, false);
 update public.produtos set quantidade = 7, atualizado_em = '2026-11-27T15:00Z' where nome = 'Gaze';
 reset role;
 select count(*) = 5 as desligado_nao_envia from net.chamadas;
+-- validade (versão 0.4)
+update public.kf_avisos set ligado = true;
+set role authenticated;
+select set_config('request.jwt.claim.sub', :DONO, false);
+update public.produtos set validade = '2027-03-05', atualizado_em = '2026-11-27T16:00Z', atualizado_por = 'Carlos' where nome = 'Gaze';
+reset role;
+select body->>'html' like '%validade: 05/03/2027%' as email_mostra_validade from net.chamadas order by id desc limit 1;
+set role authenticated;
+select set_config('request.jwt.claim.sub', :DONO, false);
+update public.produtos set sem_validade = true, validade = null, atualizado_em = '2026-11-27T16:10Z' where nome = 'Gaze';
+reset role;
+select body->>'html' like '%validade: ND (sem validade)%' as email_mostra_nd from net.chamadas order by id desc limit 1;
+-- aviso diário: só nos marcos (30, 7, 1, 0 dias, venceu ontem)
+update public.produtos set validade = (now() at time zone 'America/Sao_Paulo')::date + 12, sem_validade = false where nome = 'Cotonete';
+select public.kf_aviso_validade();
+select count(*) = 0 as validade_fora_do_marco_nao_envia from net.chamadas where body->>'subject' like 'Estoque KF · Validade%';
+update public.produtos set validade = (now() at time zone 'America/Sao_Paulo')::date + 7 where nome = 'Cotonete';
+select public.kf_aviso_validade();
+select count(*) = 1 as validade_no_marco_envia from net.chamadas where body->>'subject' like 'Estoque KF · Validade%';
+select body->>'subject' = 'Estoque KF · Validade: 1 produto(s) chegando ao prazo' and body->>'html' like '%vence em 7 dia(s)%' as assunto_validade
+  from net.chamadas order by id desc limit 1;

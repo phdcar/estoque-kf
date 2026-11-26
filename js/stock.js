@@ -28,11 +28,14 @@ export function missing(p) {
   if (!String(p.supplier || '').trim()) out.push('fornecedor');
   if (!String(p.category || '').trim()) out.push('categoria');
   if (!(Number(p.min) >= 1)) out.push('estoque mínimo');
+  if (!hasExpiryInfo(p)) out.push('validade');
   return out;
 }
 
 // quanto falta para chegar ao mínimo
 export const need = p => Math.max(0, Number(p.min) - Number(p.quantity));
+// quanto comprar: até o estoque ideal, quando ele existe; senão, até o mínimo
+export const buy = p => Math.max(need(p), Number(p.ideal) >= 1 ? Number(p.ideal) - Number(p.quantity) : 0);
 
 // lista de compras agrupada por fornecedor (só produtos abaixo do mínimo)
 export function shoppingList(products) {
@@ -41,7 +44,7 @@ export function shoppingList(products) {
     if (!isLow(p)) continue;
     const s = String(p.supplier || '').trim() || 'Sem fornecedor';
     if (!groups.has(s)) groups.set(s, []);
-    groups.get(s).push({ id: p.id, name: p.name, quantity: Number(p.quantity), min: Number(p.min), need: need(p) });
+    groups.get(s).push({ id: p.id, name: p.name, quantity: Number(p.quantity), min: Number(p.min), ideal: Number(p.ideal) || null, need: buy(p) });
   }
   const cmp = (a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' });
   return [...groups.entries()]
@@ -55,13 +58,13 @@ export function shoppingText(list, when = new Date()) {
   const lines = [`Clínica KF · Reposição de estoque · ${d}`];
   for (const g of list) {
     lines.push('', g.supplier.toUpperCase());
-    for (const i of g.items) lines.push(`• ${i.name}: comprar ${i.need} (tem ${i.quantity}, mínimo ${i.min})`);
+    for (const i of g.items) lines.push(`• ${i.name}: comprar ${i.need} (tem ${i.quantity}, mínimo ${i.min}${i.ideal ? `, ideal ${i.ideal}` : ''})`);
   }
   return lines.join('\n');
 }
 
-export function summary(products) {
-  const s = { total: products.length, esgotado: 0, critico: 0, atencao: 0, ok: 0, semMinimo: 0, incompleto: 0 };
+export function summary(products, now = new Date()) {
+  const s = { total: products.length, esgotado: 0, critico: 0, atencao: 0, ok: 0, semMinimo: 0, incompleto: 0, vencido: 0, venceLogo: 0, semValidade: 0 };
   for (const p of products) {
     const l = level(p);
     if (l === 'esgotado') s.esgotado++;
@@ -70,7 +73,42 @@ export function summary(products) {
     else if (l === 'ok') s.ok++;
     else s.semMinimo++;
     if (missing(p).length) s.incompleto++;
+    const e = expiryLevel(p, now);
+    if (e === 'vencido') s.vencido++; else if (e === 'vence-logo') s.venceLogo++; else if (e === 'sem-validade') s.semValidade++;
   }
   s.alerta = s.esgotado + s.critico;
   return s;
+}
+
+// ---------- validade ----------
+// p.expiry: 'AAAA-MM-DD', 'ND' (produto sem validade, ex.: agulha) ou vazio (não informado). "vence logo" = até EXPIRY_SOON dias.
+export const EXPIRY_SOON = 30;
+export const NO_EXPIRY = 'ND';
+export const hasExpiryInfo = p => p.expiry === NO_EXPIRY || /^\d{4}-\d{2}-\d{2}$/.test(String(p.expiry || ''));
+const dayNum = s => { const [y, m, d] = String(s).split('-').map(Number); return Date.UTC(y, m - 1, d) / 864e5; };
+const todayStr = now => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+export function daysToExpiry(p, now = new Date()) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(p.expiry || ''))) return null;
+  return dayNum(p.expiry) - dayNum(todayStr(now));
+}
+// 'vencido' | 'vence-logo' | 'ok' | 'sem-validade'
+export function expiryLevel(p, now = new Date()) {
+  const d = daysToExpiry(p, now);
+  if (p.expiry === NO_EXPIRY) return 'nd';
+  if (d === null) return 'sem-validade';
+  if (d < 0) return 'vencido';
+  if (d <= EXPIRY_SOON) return 'vence-logo';
+  return 'ok';
+}
+export function expiryText(p, now = new Date()) {
+  if (p.expiry === NO_EXPIRY) return 'ND · sem validade';
+  const d = daysToExpiry(p, now);
+  if (d === null) return '';
+  if (d < -1) return `Vencido há ${-d} dias`;
+  if (d === -1) return 'Venceu ontem';
+  if (d === 0) return 'Vence hoje';
+  if (d === 1) return 'Vence amanhã';
+  if (d <= EXPIRY_SOON) return `Vence em ${d} dias`;
+  const [y, m, dd] = p.expiry.split('-');
+  return `Validade ${dd}/${m}/${y}`;
 }

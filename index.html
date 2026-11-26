@@ -17,12 +17,19 @@
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
+  <div id="bg" aria-hidden="true">
+    <canvas></canvas>
+    <div class="tap tap-base"></div>
+    <div class="tap tap-shine"><div class="shB"><div class="shP"></div></div></div>
+    <div class="vignette"></div>
+  </div>
   <header class="top">
     <a class="brand" href="#painel" aria-label="Início">
       <span class="logo" aria-hidden="true"></span>
       <span><span class="n">Clínica KF</span><span class="s">Gestão de estoque</span></span>
     </a>
     <div class="who" id="who"></div>
+    <div id="ver" aria-hidden="true"></div>
   </header>
   <main id="main"><p class="muted">Carregando…</p></main>
   <nav class="tabs hidden" id="tabs"></nav>

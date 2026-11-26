@@ -1,12 +1,13 @@
 import { db } from './db.js';
 import { processPhoto } from './lineart.js';
 import { ymd, countStatus, history, isCountDay } from './schedule.js';
-import { level, isLow, missing, need, shoppingList, shoppingText, summary } from './stock.js';
+import { level, isLow, missing, need, shoppingList, shoppingText, summary, buy, expiryLevel, expiryText, daysToExpiry, EXPIRY_SOON, NO_EXPIRY } from './stock.js';
 import { illustrationFor, SKETCH_FILTER } from './illustrations.js';
 import { I } from './icons.js';
 import * as cloud from './cloud.js';
+import { startAmbient, skyState, PERIOD_NAME, tapURI } from './ambient.js';
 
-export const APP_VERSION = '0.3.0';
+export const APP_VERSION = '0.4.0';
 export { isLow };
 
 // ---------- utilidades ----------
@@ -128,8 +129,8 @@ function renderChrome(r) {
     ? `${esc(S.profile.name)} · <span class="role">${roleName(S.profile.role)}</span><br><span id="sync"></span>` : '';
   renderSyncBadge();
   const tabs = $('#tabs');
-  if (!S.profile) { tabs.classList.add('hidden'); return; }
-  tabs.classList.remove('hidden');
+  if (!S.profile) { tabs.classList.add('hidden'); document.body.classList.remove('has-tabs'); return; }
+  tabs.classList.remove('hidden'); document.body.classList.add('has-tabs');
   const lk = locked();
   const alerts = S.products.filter(isLow).length;
   const items = [
@@ -308,6 +309,13 @@ const LEVEL = {
   ok: ['Em dia', 'green'], 'sem-minimo': ['Sem mínimo', 'gray'], 'esgotado-sem-minimo': ['Sem mínimo', 'gray'],
 };
 
+const EXP_TONE = { vencido: 'red', 'vence-logo': 'amber', ok: 'gray' };
+function expPill(p) {
+  const e = expiryLevel(p, now());
+  if (e !== 'vencido' && e !== 'vence-logo') return '';
+  return `<span class="pill exp ${EXP_TONE[e]}" title="Validade ${fmtDay(p.expiry)}">${I.clock || ''}${expiryText(p, now())}</span>`;
+}
+
 function prodRow(p) {
   const l = level(p);
   const [label, tone] = LEVEL[l];
@@ -322,7 +330,7 @@ function prodRow(p) {
       <div class="info">
         <a class="name" href="#produto/${p.id}">${esc(p.name)}</a>
         <div class="meta">${meta}${miss.length ? `${meta ? ' · ' : ''}<span class="miss">Falta: ${miss.join(', ')}</span>` : ''}</div>
-        <div class="level"><span class="pill ${tone}">${label}</span>
+        <div class="level"><span class="pill ${tone}">${label}</span>${expPill(p)}
           ${Number(p.min) >= 1 ? `<span class="bar ${tone}" title="${p.quantity} de ${p.min}"><i style="width:${pct}%"></i></span>` : ''}</div>
       </div>
       <div class="qty">
@@ -373,7 +381,8 @@ function radarSvg(products) {
 
 // ---------- tela: painel (radar) ----------
 async function viewDashboard() {
-  const sm = summary(S.products);
+  const sm = summary(S.products, now());
+  const exp = S.products.filter(p => ['vencido', 'vence-logo'].includes(expiryLevel(p, now()))).sort((a, b) => daysToExpiry(a, now()) - daysToExpiry(b, now()) || byName(a, b));
   const alerts = S.products.filter(isLow).sort((a, b) => (a.quantity - a.min) - (b.quantity - b.min) || byName(a, b));
   const atn = S.products.filter(p => level(p) === 'atencao').sort(byName);
   const inc = S.products.filter(p => missing(p).length).sort(byName);
@@ -383,9 +392,15 @@ async function viewDashboard() {
   const today = now().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
   const todayCap = today.charAt(0).toUpperCase() + today.slice(1);
   main().innerHTML = `
-    <div class="hello"><div class="eyebrow">Painel</div><h2>${hello}, ${esc(S.profile.name.split(' ')[0])}</h2><div class="d">${todayCap}</div></div>
+    <div class="hello">
+      <div class="eyebrow">${PERIOD_NAME[skyState(now()).name]} · ${fmtTime(now().toISOString())}</div>
+      <h2>${hello}, ${esc(S.profile.name.split(' ')[0])}</h2>
+      <div class="d">${todayCap}</div>
+      <div class="orn" aria-hidden="true"><i></i><b></b><i></i></div>
+    </div>
     ${countBanner()}
     <section class="radar-card" aria-label="Radar de estoque">
+      <div class="face-tap" aria-hidden="true"><div class="shB"><div class="shP"></div></div></div>
       <div class="radar ${sm.alerta ? 'alert' : ''}">${radarSvg(S.products)}
         <div class="ctr"><b id="radar-n">${sm.alerta}</b><span>em alerta</span></div></div>
       <div class="kpis">
@@ -393,6 +408,8 @@ async function viewDashboard() {
         <a class="kpi red" href="#estoque/alerta"><span><i style="background:#E0796F"></i>Esgotados (zerados)</span><b>${sm.esgotado}</b></a>
         <a class="kpi amber" href="#estoque/atencao"><span><i style="background:#EBCB8B"></i>No limite</span><b>${sm.atencao}</b></a>
         <a class="kpi green" href="#estoque/ok"><span><i style="background:#9ED2B5"></i>Em dia</span><b>${sm.ok}</b></a>
+        <a class="kpi ${sm.vencido ? 'red' : 'gray'}" href="#estoque/validade"><span><i style="background:#C99A92"></i>Vencidos</span><b>${sm.vencido}</b></a>
+        <a class="kpi amber" href="#estoque/validade"><span><i style="background:#E8C27A"></i>Vencem em ${EXPIRY_SOON} dias</span><b>${sm.venceLogo}</b></a>
         <a class="kpi gray" href="#estoque/incompleto"><span><i style="background:#9A9284"></i>Cadastro incompleto</span><b>${sm.incompleto}</b></a>
       </div>
     </section>
@@ -400,6 +417,8 @@ async function viewDashboard() {
     <h3>Radar · abaixo do mínimo (${alerts.length})</h3>
     ${alerts.length ? `<ul class="list" id="alist">${alerts.map(prodRow).join('')}</ul>`
       : `<div class="card empty">${I.ok}<p>Nenhum produto abaixo do mínimo.</p></div>`}
+
+    ${exp.length ? `<h3>Validade · vencidos e a vencer (${exp.length})</h3><ul class="list" id="elist">${exp.map(prodRow).join('')}</ul>` : ''}
 
     ${list.length ? `
     <h3>Reposição por fornecedor</h3>
@@ -418,12 +437,12 @@ async function viewDashboard() {
     <h3>Cadastro incompleto (${inc.length})</h3>
     <div class="card small">
       <p style="margin-top:0" class="muted">Sem o estoque mínimo o radar não consegue vigiar o produto. Complete os dados destes itens:</p>
-      ${inc.slice(0, 8).map(p => `<a class="it" style="display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--line);text-decoration:none" href="#editar/${p.id}">
+      ${inc.slice(0, 8).map(p => `<a class="it" style="display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--line);color:inherit;text-decoration:none" href="#editar/${p.id}">
         <span>${esc(p.name)}<br><span class="muted">Falta: ${missing(p).join(', ')}</span></span><span style="color:var(--gold-ink);font-weight:500">Completar</span></a>`).join('')}
       ${inc.length > 8 ? `<a class="btn secondary block" style="margin-top:8px" href="#estoque/incompleto">Ver todos (${inc.length})</a>` : ''}
     </div>` : ''}
     <p class="foot">Clínica KF · Estoque ${APP_VERSION}</p>`;
-  for (const l of [$('#alist'), $('#wlist')]) if (l) bindQty(l);
+  for (const l of [$('#alist'), $('#wlist'), $('#elist')]) if (l) bindQty(l);
   const sh = $('#share');
   if (sh) sh.onclick = async () => {
     const text = shoppingText(list, now());
@@ -441,9 +460,9 @@ async function viewDashboard() {
 // ---------- tela: lista de produtos ----------
 let searchTerm = '';
 let category = '';
-const FILTERS = [['todos', 'Todos'], ['alerta', 'Abaixo do mínimo'], ['atencao', 'No limite'], ['ok', 'Em dia'], ['incompleto', 'Incompletos']];
+const FILTERS = [['todos', 'Todos'], ['alerta', 'Abaixo do mínimo'], ['atencao', 'No limite'], ['ok', 'Em dia'], ['validade', 'Validade'], ['incompleto', 'Incompletos']];
 const matchFilter = (p, f) => f === 'alerta' ? isLow(p) : f === 'atencao' ? level(p) === 'atencao'
-  : f === 'ok' ? level(p) === 'ok' : f === 'incompleto' ? missing(p).length > 0 : true;
+  : f === 'ok' ? level(p) === 'ok' : f === 'validade' ? ['vencido', 'vence-logo'].includes(expiryLevel(p, now())) : f === 'incompleto' ? missing(p).length > 0 : true;
 
 async function viewList(filter = 'todos') {
   if (!FILTERS.some(([k]) => k === filter)) filter = 'todos';
@@ -451,7 +470,7 @@ async function viewList(filter = 'todos') {
   const cats = categories().filter(c => S.products.some(p => p.category === c));
   if (category && !cats.includes(category)) category = '';
   const base = S.products.filter(p => !category || p.category === category);
-  const items = base.filter(p => matchFilter(p, filter)).sort((a, b) => (isLow(b) - isLow(a)) || byName(a, b));
+  const items = base.filter(p => matchFilter(p, filter)).sort(filter === 'validade' ? (a, b) => daysToExpiry(a, now()) - daysToExpiry(b, now()) : (a, b) => (isLow(b) - isLow(a)) || byName(a, b));
   const count = f => base.filter(p => matchFilter(p, f)).length;
   main().innerHTML = `
     ${countBanner()}
@@ -496,6 +515,8 @@ async function viewProduct(id) {
     <h2>${esc(p.name)}</h2>
     <div style="margin:6px 0"><span class="pill ${tone}">${label}</span></div>
     ${isLow(p) ? `<div class="banner red">${I.alert}<span>Abaixo do mínimo: tem ${p.quantity}, mínimo ${p.min}. Comprar pelo menos ${need(p)}.</span></div>` : ''}
+    ${(() => { const e = expiryLevel(p, now()); return e === 'vencido' ? `<div class="banner red">${I.alert}<span>${expiryText(p, now())} (validade ${fmtDay(p.expiry)}). Separe para descarte.</span></div>`
+      : e === 'vence-logo' ? `<div class="banner amber">${I.info}<span>${expiryText(p, now())} (validade ${fmtDay(p.expiry)}). Use este lote primeiro.</span></div>` : ''; })()}
     ${miss.length ? `<div class="banner amber">${I.info}<span>Cadastro incompleto. Falta: ${miss.join(', ')}.</span></div>` : ''}
     <div class="hero">${u ? `<img class="big-img" id="big" src="${u.line}" alt="Desenho do produto">` : illustrationFor(p.name)}</div>
     ${u ? `
@@ -505,9 +526,12 @@ async function viewProduct(id) {
       </div>` : `<p class="small muted" style="text-align:center;margin:0">Desenho ilustrativo. Edite o produto para colocar uma foto.</p>`}
     <div class="facts">
       <div><span>Quantidade</span><b class="${isLow(p) ? 'red' : ''}" id="f-qt">${p.quantity}</b></div>
-      <div><span>Estoque mínimo</span><b ${Number(p.min) >= 1 ? '' : 'class="miss"'}>${Number(p.min) >= 1 ? p.min : 'Não definido'}</b></div>
+      <div><span>Alerta (mínimo)</span><b ${Number(p.min) >= 1 ? '' : 'class="miss"'}>${Number(p.min) >= 1 ? p.min : 'Não definido'}</b></div>
+      <div><span>Estoque ideal</span><b class="${Number(p.ideal) >= 1 ? '' : 'sm muted'}">${Number(p.ideal) >= 1 ? p.ideal : '—'}</b></div>
+      <div><span>Comprar</span><b class="${isLow(p) ? 'red' : 'sm muted'}">${isLow(p) ? buy(p) : buy(p) ? `${buy(p)} <small>até o ideal</small>` : 'Nada agora'}</b></div>
       <div><span>Fornecedor</span><b class="${p.supplier ? 'sm' : 'miss'}">${p.supplier ? esc(p.supplier) : 'Não informado'}</b></div>
       <div><span>Categoria</span><b class="${p.category ? 'sm' : 'miss'}">${p.category ? esc(p.category) : 'Não informada'}</b></div>
+      <div class="wide"><span>Validade</span><b id="f-vl" class="sm ${!p.expiry ? 'miss' : ''} ${{ vencido: 'red', 'vence-logo': 'amber' }[expiryLevel(p, now())] || ''}">${p.expiry === NO_EXPIRY ? 'ND · sem validade' : p.expiry ? `${fmtDay(p.expiry)} <small>· ${expiryText(p, now())}</small>` : 'Não informada'}</b></div>
     </div>
     <p class="small muted">Atualizado em ${fmtDateTime(p.updatedAt)}${p.updatedBy ? ' por ' + esc(p.updatedBy) : ''}.</p>
     <p><a class="btn block" href="#editar/${p.id}">${I.edit}Editar produto</a></p>
@@ -554,10 +578,19 @@ async function viewForm(id) {
       <div class="row">
         <div><label for="qt">Quantidade atual ${req}</label>
           <input id="qt" type="number" inputmode="numeric" min="0" step="1" value="${p ? p.quantity : ''}"></div>
-        <div><label for="mn">Estoque mínimo ${req}</label>
+        <div><label for="mn">Alerta (mínimo) ${req}</label>
           <input id="mn" type="number" inputmode="numeric" min="1" step="1" value="${p && Number(p.min) >= 1 ? p.min : ''}"></div>
       </div>
-      <div class="hint">Abaixo do mínimo, o produto fica vermelho e entra no radar.</div>
+      <div class="hint">Abaixo do alerta, o produto fica vermelho, entra no radar e você recebe o e-mail.</div>
+      <label for="id">Estoque ideal</label>
+      <input id="id" type="number" inputmode="numeric" min="1" step="1" value="${p && Number(p.ideal) >= 1 ? p.ideal : ''}">
+      <div class="hint">Opcional. A lista de compras sugere comprar até o ideal.</div>
+      <label for="vl">Data de validade ${req}</label>
+      <div class="row vrow">
+        <input id="vl" type="date" value="${p?.expiry && p.expiry !== NO_EXPIRY ? esc(p.expiry) : ''}" ${p?.expiry === NO_EXPIRY ? 'disabled' : ''}>
+        <label class="nd"><input type="checkbox" id="nd" ${p?.expiry === NO_EXPIRY ? 'checked' : ''}><span>ND</span><small>sem validade</small></label>
+      </div>
+      <div class="hint">Do lote que está na prateleira (o que vence primeiro). Vencidos ficam vermelhos; a ${EXPIRY_SOON} dias do vencimento o produto entra no radar.</div>
       <label>Foto</label>
       <div class="row">
         <button type="button" class="secondary" id="cam">${I.camera}Tirar foto</button>
@@ -573,6 +606,7 @@ async function viewForm(id) {
       <div id="err" class="banner red hidden" role="alert" style="margin:14px 0 0"></div>
       <p style="margin-top:16px"><button class="block" type="submit" id="save">Salvar</button></p>
     </form>`;
+  $('#nd').onchange = () => { $('#vl').disabled = $('#nd').checked; if ($('#nd').checked) $('#vl').value = ''; };
   $('#cam').onclick = () => $('#f-cam').click();
   $('#gal').onclick = () => $('#f-gal').click();
   const onFile = async e => {
@@ -602,6 +636,8 @@ async function viewForm(id) {
     const cat = $('#ct').value.trim().replace(/\s+/g, ' ');
     const sup = $('#fn').value.trim().replace(/\s+/g, ' ');
     const qt = $('#qt').value.trim(), mn = $('#mn').value.trim();
+    const idl = $('#id').value.trim();
+    const nd = $('#nd').checked, vl = nd ? NO_EXPIRY : $('#vl').value.trim();
     if (!name) return showErr('Informe o nome do produto.', 'nm');
     const dup = S.products.find(x => x.id !== p?.id && x.name.trim().toLowerCase() === name.toLowerCase());
     if (dup) return showErr(`Já existe um produto chamado "${dup.name}".`, 'nm');
@@ -609,10 +645,13 @@ async function viewForm(id) {
     if (!sup) return showErr('Informe o fornecedor.', 'fn');
     if (!/^\d+$/.test(qt)) return showErr('Informe a quantidade atual (número inteiro, 0 ou mais).', 'qt');
     if (!/^\d+$/.test(mn) || Number(mn) < 1) return showErr('Informe o estoque mínimo (número inteiro, 1 ou mais).', 'mn');
+    if (idl && !/^\d+$/.test(idl)) return showErr('Estoque ideal: use um número inteiro.', 'id');
+    if (!vl) return showErr('Informe a data de validade ou marque ND (sem validade).', 'vl');
+    if (vl !== NO_EXPIRY && !/^\d{4}-\d{2}-\d{2}$/.test(vl)) return showErr('Data de validade inválida.', 'vl');
     $('#save').disabled = true;
     const ts = new Date().toISOString();
     const rec = p ? { ...(await db.get('products', p.id)) } : { id: uuid(), createdAt: ts, createdBy: S.profile.name };
-    Object.assign(rec, { name, category: cat, supplier: sup, quantity: Number(qt), min: Number(mn), updatedAt: ts, updatedBy: S.profile.name });
+    Object.assign(rec, { name, category: cat, supplier: sup, quantity: Number(qt), min: Number(mn), ideal: idl ? Number(idl) : null, expiry: vl, updatedAt: ts, updatedBy: S.profile.name });
     rec._dirty = true;
     if (newPhoto) {
       rec._photoDirty = true;
@@ -869,6 +908,10 @@ function renderSyncBadge() {
 
 // ---------- início ----------
 $('#defs').innerHTML = SKETCH_FILTER;
+$('#ver').textContent = 'versão ' + APP_VERSION;
+document.documentElement.style.setProperty('--tap-deep', tapURI(15, 'deep'));
+document.documentElement.style.setProperty('--tap-deephi', tapURI(15, 'deephi'));
+try { startAmbient(); } catch (e) { console.warn('fundo', e); }
 window.addEventListener('hashchange', render);
 // reavalia o bloqueio quando o app volta para a tela (ex.: virou o dia)
 document.addEventListener('visibilitychange', () => { if (!document.hidden) render(); });

@@ -134,12 +134,14 @@ begin
         case when n.minimo <> o.minimo then 'mínimo ' || o.minimo || ' → ' || n.minimo end,
         case when n.fornecedor is distinct from o.fornecedor then 'fornecedor: ' || coalesce(n.fornecedor, '—') end,
         case when n.categoria is distinct from o.categoria then 'categoria: ' || coalesce(n.categoria, '—') end,
-        case when n.foto_chave is distinct from o.foto_chave then 'foto nova' end))), '[]'::jsonb)
+        case when n.foto_chave is distinct from o.foto_chave then 'foto nova' end,
+        case when (n.validade, n.sem_validade) is distinct from (o.validade, o.sem_validade) then
+          'validade: ' || case when n.sem_validade then 'ND (sem validade)' when n.validade is null then '—' else to_char(n.validade, 'DD/MM/YYYY') end end))), '[]'::jsonb)
     into mud
     from novas n join antigas o on o.id = n.id
-   where (n.quantidade, n.minimo, n.nome, n.excluido, coalesce(n.fornecedor, ''), coalesce(n.categoria, ''), coalesce(n.foto_chave, ''))
+   where (n.quantidade, n.minimo, n.nome, n.excluido, coalesce(n.fornecedor, ''), coalesce(n.categoria, ''), coalesce(n.foto_chave, ''), n.validade, n.sem_validade)
          is distinct from
-         (o.quantidade, o.minimo, o.nome, o.excluido, coalesce(o.fornecedor, ''), coalesce(o.categoria, ''), coalesce(o.foto_chave, ''));
+         (o.quantidade, o.minimo, o.nome, o.excluido, coalesce(o.fornecedor, ''), coalesce(o.categoria, ''), coalesce(o.foto_chave, ''), o.validade, o.sem_validade);
   perform kf_aviso_produtos(mud);
   return null;
 exception when others then raise warning 'kf_produtos_aviso_upd: %', sqlerrm; return null;
@@ -152,7 +154,8 @@ begin
   select coalesce(jsonb_agg(jsonb_build_object(
       'nome', n.nome, 'por', coalesce(n.atualizado_por, n.criado_por), 'qtd', n.quantidade, 'qtd_antes', null,
       'min', n.minimo, 'excluido', n.excluido, 'tipo', 'novo',
-      'extra', concat_ws(' · ', n.fornecedor, n.categoria))), '[]'::jsonb)
+      'extra', concat_ws(' · ', n.fornecedor, n.categoria,
+        case when n.sem_validade then 'sem validade' when n.validade is not null then 'validade ' || to_char(n.validade, 'DD/MM/YYYY') end))), '[]'::jsonb)
     into mud from novas n where not n.excluido;
   perform kf_aviso_produtos(mud);
   return null;
@@ -177,6 +180,38 @@ begin
   end loop;
   return null;
 exception when others then raise warning 'kf_conferencia_aviso: %', sqlerrm; return null;
+end $$;
+
+-- aviso diário de validade (8h de Brasília): só manda quando algum produto chega a 30, 7, 1 ou 0 dias,
+-- ou venceu ontem; assim o e-mail não se repete todo dia com a mesma lista.
+create or replace function public.kf_aviso_validade() returns void
+language plpgsql security definer set search_path = public as $$
+declare hoje date := (now() at time zone 'America/Sao_Paulo')::date; marcos int; vencidos int; lista text;
+begin
+  select count(*) filter (where validade - hoje in (30, 7, 1, 0, -1)), count(*) filter (where validade < hoje),
+         string_agg(format('<tr style="background:%s"><td style="padding:8px;border-bottom:1px solid #E7E0D4">%s</td><td style="padding:8px;border-bottom:1px solid #E7E0D4">%s</td><td style="padding:8px;border-bottom:1px solid #E7E0D4">%s</td></tr>',
+           case when validade < hoje then '#FBEDEB' else '#FFFFFF' end, kf_html(nome), to_char(validade, 'DD/MM/YYYY'),
+           case when validade < hoje then '<b style="color:#B3261E">vencido há ' || (hoje - validade) || ' dia(s)</b>'
+                when validade = hoje then '<b>vence hoje</b>' else 'vence em ' || (validade - hoje) || ' dia(s)' end), '' order by validade, nome)
+    into marcos, vencidos, lista
+    from public.produtos where not excluido and not sem_validade and validade is not null and validade <= hoje + 30;
+  if coalesce(marcos, 0) = 0 then return; end if;
+  perform kf_enviar_email(
+    'Estoque KF · Validade: ' || marcos || ' produto(s) chegando ao prazo' || case when vencidos > 0 then ' · ' || vencidos || ' vencido(s)' else '' end,
+    format('<div style="font-family:Arial,sans-serif;color:#121A24;max-width:560px">'
+      '<div style="background:#121A24;color:#F3EFE7;padding:14px 18px;border-radius:10px 10px 0 0"><b style="font-size:17px">Clínica KF</b><br><span style="color:#CDB27E;font-size:12px;letter-spacing:2px">VALIDADE</span></div>'
+      '<p>Produtos vencidos ou que vencem nos próximos 30 dias, em %s:</p>'
+      '<table style="border-collapse:collapse;width:100%%;font-size:14px"><tr style="text-align:left;color:#6E675C"><th style="padding:8px">Produto</th><th style="padding:8px">Validade</th><th style="padding:8px">Situação</th></tr>%s</table>'
+      '<p style="color:#6E675C;font-size:12px">Aviso automático do app de estoque.</p></div>', to_char(hoje, 'DD/MM/YYYY'), lista));
+exception when others then raise warning 'kf_aviso_validade: %', sqlerrm;
+end $$;
+revoke all on function public.kf_aviso_validade() from public, anon, authenticated;
+
+do $$ begin
+  create extension if not exists pg_cron;
+  perform cron.unschedule(jobid) from cron.job where jobname = 'kf-aviso-validade';
+  perform cron.schedule('kf-aviso-validade', '0 11 * * *', 'select public.kf_aviso_validade()');
+exception when others then raise notice 'pg_cron: %', sqlerrm;
 end $$;
 
 drop trigger if exists kf_aviso_upd on public.produtos;
