@@ -25,7 +25,7 @@ const fmtTime = iso => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digi
 const fmtDateTime = iso => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 const byName = (a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' });
 const plural = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
-const DEFAULT_CATEGORIES = ['Insumos', 'Alegra'];
+const DEFAULT_CATEGORIES = ['Insumos', 'Medicamentos'];
 
 function toast(msg) {
   for (const old of $$('.toast')) old.remove();

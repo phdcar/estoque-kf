@@ -3,7 +3,7 @@
 alter table public.produtos add column if not exists fornecedor text;
 alter table public.produtos add column if not exists categoria  text;
 
--- categorias da lista em papel (INSUMOS e ALEGRA)
+-- categorias da lista em papel (INSUMOS e ALEGRA, depois renomeada para Medicamentos)
 update public.produtos set categoria = 'Alegra', atualizado_em = now(), atualizado_por = 'Lista inicial'
  where categoria is null and criado_por = 'Lista inicial' and nome in (
   'ÁCIDO TRANEXÂMICO','DEOSIL','POMADA DIPROGENTA','DIPIRONA 1G','DEXAMETASONA 4ML',
@@ -32,3 +32,7 @@ where p.nome = f.nome and p.fornecedor is null;
 
 select categoria, count(*) as produtos, count(fornecedor) as com_fornecedor
 from public.produtos where not excluido group by categoria order by categoria;
+
+-- correção pedida pelo dono: "Alegra" é a categoria de medicamentos
+update public.produtos set categoria = 'Medicamentos', atualizado_em = now() where categoria = 'Alegra';
+update public.produtos set nome = 'POMADA ANESTÉSICA (MEDICAMENTO)', atualizado_em = now() where nome = 'POMADA ANESTÉSICA (ALEGRA)';
