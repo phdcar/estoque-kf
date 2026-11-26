@@ -1,5 +1,6 @@
 -- Imitação mínima do que o Supabase já tem pronto (só para testar localmente)
 create role anon nologin;
+create role service_role nologin;
 create role authenticated nologin;
 create schema auth;
 create table auth.users (id uuid primary key, email text);

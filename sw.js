@@ -1,5 +1,5 @@
 // Service worker: guarda os arquivos do app para abrir sem internet.
-const VERSION = 'kf-estoque-v0.5.1';
+const VERSION = 'kf-estoque-v0.6.0';
 const ASSETS = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/app.js', 'js/ambient.js', 'js/db.js', 'js/stock.js', 'js/illustrations.js', 'js/icons.js', 'js/lineart.js', 'js/schedule.js', 'js/cloud.js', 'js/config.js',
@@ -30,4 +30,30 @@ self.addEventListener('fetch', e => {
     }).catch(() => caches.match(req, { ignoreSearch: true })
       .then(r => r || (req.mode === 'navigate' ? caches.match('index.html') : Response.error())))
   );
+});
+
+// ---------- notificações push (etapa 3): mostra o aviso e atualiza o número no ícone ----------
+self.addEventListener('push', e => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data ? e.data.text() : '' }; }
+  const jobs = [self.registration.showNotification(d.title || 'Estoque KF', {
+    body: d.body || 'O estoque foi alterado.',
+    icon: 'icons/icon-192.png',
+    badge: 'icons/icon-192.png',
+    tag: 'kf-estoque',
+    renotify: true,
+    data: { url: d.url || './#painel' },
+  })];
+  if (typeof d.badge === 'number' && self.navigator.setAppBadge) {
+    jobs.push((d.badge > 0 ? self.navigator.setAppBadge(d.badge) : self.navigator.clearAppBadge()).catch(() => {}));
+  }
+  e.waitUntil(Promise.all(jobs));
+});
+
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+    for (const c of list) if ('focus' in c) { c.navigate('./#painel').catch(() => {}); return c.focus(); }
+    return self.clients.openWindow('./#painel');
+  }));
 });

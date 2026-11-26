@@ -18,6 +18,9 @@ $P -d t -f "$DIR/../../supabase/schema.sql" >/dev/null   # rodar 2x não pode da
 $P -d t -f "$DIR/stubs_avisos.sql" >/dev/null
 $P -d t -f "$DIR/../../supabase/avisos-email.sql" >/dev/null
 $P -d t -f "$DIR/../../supabase/avisos-email.sql" >/dev/null   # rodar 2x não pode dar erro
+$P -d t -f "$DIR/../../supabase/push.sql" >/dev/null
+$P -d t -f "$DIR/../../supabase/push.sql" >/dev/null
+$P -d t -f "$DIR/../../supabase/avisos-email.sql" >/dev/null
 OUT=$($P -d t -t -A -f "$DIR/rls_test.sql" 2>&1) || { echo "$OUT"; exit 1; }
 OUT2=$($P -d t -t -A -f "$DIR/avisos_test.sql" 2>&1) || { echo "$OUT"; echo "$OUT2"; exit 1; }
 OUT="$OUT

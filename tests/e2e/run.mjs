@@ -477,12 +477,14 @@ try {
     assert.equal(row.validade, null);
     assert.equal(fake.tables.produtos.find(p => p.nome === 'Álcool 70% 1L').validade, '2026-12-20');
     await nav(op, '#painel');
-    assert.equal(await op.textContent('#radar-n'), '1');
+    await op.waitForFunction(() => document.querySelector('#radar-n')?.textContent === '1');
     assert.deepEqual(await op.$$eval('#alist li.prod .name', els => els.map(e => e.textContent)), ['Agulha 31G']);
     assert.equal(await op.locator('#alist li.prod .ping').count(), 1);
     assert.match(await op.textContent('#shop'), /Mercado Livre.*Agulha 31G.*comprar 2/s);
-    await op.waitForFunction(() => document.querySelectorAll('.radar .blip').length >= 1);
-    await shot(op, '11-painel-radar');
+    await op.waitForFunction(() => { const p = document.querySelector('.ring .prog'); return p && Number(p.getAttribute('stroke-dashoffset')) < 527 && /\d/.test(document.querySelector('.ring .ctr b').textContent); });
+    assert.match(await op.textContent('.contrib'), /Estoque acima do alerta.*Validade em dia.*Conferência diária.*Cadastro completo/s);
+    await op.waitForTimeout(1600);
+    await op.screenshot({ path: path.join(SHOTS, '11-painel-saude.png'), fullPage: true });
     await nav(op, '#estoque/alerta');
     assert.deepEqual(await op.$$eval('#plist li.prod .name', els => els.map(e => e.textContent)), ['Agulha 31G']);
     await shot(op, '12-estoque-filtro-alerta');

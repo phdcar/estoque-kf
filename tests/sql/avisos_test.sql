@@ -119,3 +119,16 @@ select body->>'subject' = 'Estoque KF · Justificativa de Bruna: conferência n�
 set role authenticated;
 select pg_temp.esperar_erro($$insert into public.conferencias(id, dia, feita_em, por_nome, por_papel, por_user, itens, justificativa) values (gen_random_uuid(), '2026-11-30', now(), 'B', 'funcionario', auth.uid(), '[]', 'curta')$$, 'check');
 reset role;
+-- push (etapa 3)
+select count(*) = 0 as sem_inscricao_sem_push from net.chamadas where url like '%kf-push%';
+set role authenticated;
+select set_config('request.jwt.claim.sub', :DONO, false);
+insert into public.kf_push_inscricoes (endpoint, p256dh, auth) values ('https://web.push.apple.com/abc', 'BPUB', 'AUTH');
+select count(*) = 1 as dono_ve_propria_inscricao from public.kf_push_inscricoes;
+select pg_temp.esperar_erro($$select * from public.kf_push_config$$, 'permission denied');
+select pg_temp.esperar_erro($$select * from public.kf_push_destinos()$$, 'permission denied');
+update public.produtos set quantidade = 0, atualizado_em = '2026-11-28T10:00Z', atualizado_por = 'Carlos' where nome = 'Gaze';
+reset role;
+select body->>'acao' = 'enviar' and body->>'segredo' = (select segredo from public.kf_push_config) and length(body->>'segredo') >= 40
+   and body->>'body' like 'Gaze: % → 0 (Carlos)%' and (body->>'badge')::int >= 1 as push_enviado_com_numero
+  from net.chamadas where url like '%/functions/v1/kf-push' order by id desc limit 1;

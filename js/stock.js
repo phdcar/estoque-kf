@@ -128,3 +128,25 @@ export function sentenceCase(s) {
   const out = words.join(' ');
   return out.charAt(0).toUpperCase() + out.slice(1);
 }
+
+// ---------- saúde do estoque (nota de 0 a 100, estilo "anel" do painel) ----------
+// Cada parte vale de 0 a 1 (null = ainda sem dados e fica fora da conta).
+//   estoque:     produtos com alerta definido que estão no alerta ou acima
+//   validade:    produtos com validade informada (ou ND) que não venceram; vence logo vale meio
+//   conferencia: dias úteis recentes conferidos (justificado vale meio), calculado no app
+//   cadastro:    produtos com cadastro completo
+export const HEALTH_WEIGHTS = { estoque: 0.5, validade: 0.2, conferencia: 0.2, cadastro: 0.1 };
+export function health(products, now = new Date(), conferencia = null) {
+  const ratio = (list, f) => list.length ? list.reduce((n, p) => n + f(p), 0) / list.length : null;
+  const parts = {
+    estoque: ratio(products.filter(p => Number(p.min) >= 1), p => isLow(p) ? 0 : 1),
+    validade: ratio(products.filter(hasExpiryInfo), p => ({ vencido: 0, 'vence-logo': 0.5 })[expiryLevel(p, now)] ?? 1),
+    conferencia,
+    cadastro: ratio(products, p => missing(p).length ? 0 : 1),
+  };
+  let w = 0, s = 0;
+  for (const [k, v] of Object.entries(parts)) if (v != null) { w += HEALTH_WEIGHTS[k]; s += HEALTH_WEIGHTS[k] * v; }
+  const score = w ? Math.round((s / w) * 100) : null;
+  const word = score == null ? 'Sem dados' : score >= 85 ? 'Ótimo' : score >= 70 ? 'Bom' : score >= 50 ? 'Atenção' : 'Crítico';
+  return { score, word, parts };
+}

@@ -46,6 +46,13 @@ language plpgsql security definer set search_path = public as $$
 declare
   k text; dest text; ok boolean; req bigint;
 begin
+  -- notificação push no celular do dono (se o push estiver instalado: supabase/push.sql)
+  begin
+    if to_regprocedure('public.kf_enviar_push(text,text)') is not null then
+      execute 'select public.kf_enviar_push($1, $2)' using 'Estoque KF', regexp_replace(p_assunto, '^Estoque KF · ', '');
+    end if;
+  exception when others then null;
+  end;
   select email, ligado into dest, ok from public.kf_avisos where id = 1;
   if not coalesce(ok, false) or coalesce(dest, '') = '' then return; end if;
   begin

@@ -81,3 +81,18 @@ test('nome só com a primeira letra maiúscula', async () => {
   assert.equal(sentenceCase('GAZE Estéril'), 'Gaze estéril');
   assert.equal(sentenceCase('álcool 70%'), 'Álcool 70%');
 });
+
+test('saúde do estoque: nota de 0 a 100 com as partes disponíveis', async () => {
+  const { health } = await import('../../js/stock.js');
+  const now = new Date('2026-11-26T10:00:00');
+  const P = (q, min, expiry = '') => ({ id: String(Math.random()), name: 'X', quantity: q, min, ideal: 0, supplier: 'S', category: 'Insumos', expiry });
+  assert.equal(health([], now).score, null);
+  // 1 de 2 abaixo do alerta, sem validade informada, sem conferência: só estoque e cadastro contam
+  let h = health([P(5, 2, 'ND'), P(1, 2, 'ND')], now);
+  assert.equal(h.parts.estoque, 0.5); assert.equal(h.parts.validade, 1);
+  h = health([P(5, 2, '2026-01-01'), P(5, 2, '2026-12-10')], now, 1);
+  assert.equal(h.parts.validade, 0.25); // vencido 0 + vence logo 0,5
+  assert.equal(h.score, Math.round((0.5 * 1 + 0.2 * 0.25 + 0.2 * 1 + 0.1 * h.parts.cadastro) * 100));
+  assert.equal(health([P(5, 2, 'ND')], now, 1).word, 'Ótimo');
+  assert.equal(health([P(0, 2, 'ND')], now, 0).word, 'Crítico');
+});

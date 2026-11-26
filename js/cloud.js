@@ -314,3 +314,15 @@ export function stopAuto() {
   clearInterval(timer); timer = null;
   if (channel) { try { sb().removeChannel(channel); } catch { /* ignore */ } channel = null; }
 }
+
+// ---------- notificações push (etapa 3) ----------
+const pushFn = body => fetch(`${CONFIG.url}/functions/v1/kf-push`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json', apikey: CONFIG.key }, body: JSON.stringify(body),
+}).then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.erro || `HTTP ${r.status}`); return j; });
+export async function pushKey() { return (await pushFn({ acao: 'chave' })).chave; }
+export async function pushSave(sub) {
+  const j = sub.toJSON();
+  const { error } = await sb().from('kf_push_inscricoes').upsert({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth }, { onConflict: 'endpoint' });
+  if (error) throw new Error(msg(error));
+}
+export async function pushTest(endpoint, badge) { return pushFn({ acao: 'teste', endpoint, badge }); }
