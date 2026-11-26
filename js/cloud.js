@@ -92,12 +92,31 @@ const toRemoteProduct = p => ({
   fornecedor: p.supplier || null, categoria: p.category || null, validade: /^\d{4}-/.test(p.expiry || '') ? p.expiry : null, sem_validade: p.expiry === 'ND',
   criado_em: p.createdAt, criado_por: p.createdBy || null, atualizado_em: p.updatedAt,
   atualizado_por: p.updatedBy || null, excluido: !!p.deleted,
+  preco: p.price != null && p.price !== '' ? Number(p.price) : null, codigo_barras: p.barcode || null, lotes: (p.lots || []).map(l => ({ id: l.id, validade: l.expiry, qtd: Number(l.qty) })),
 });
 const fromRemoteProduct = r => ({
   id: r.id, name: r.nome, quantity: r.quantidade, min: r.minimo, ideal: r.ideal ?? null, photoKey: r.foto_chave || null,
   supplier: r.fornecedor || '', category: r.categoria || '', expiry: r.sem_validade ? 'ND' : (r.validade ? String(r.validade).slice(0, 10) : ''),
   createdAt: new Date(r.criado_em).toISOString(), createdBy: r.criado_por,
   updatedAt: new Date(r.atualizado_em).toISOString(), updatedBy: r.atualizado_por, deleted: r.excluido,
+  price: r.preco != null ? Number(r.preco) : null, barcode: r.codigo_barras || '', lots: Array.isArray(r.lotes) ? r.lotes.map(l => ({ id: l.id, expiry: String(l.validade).slice(0, 10), qty: Number(l.qtd) })) : [],
+});
+const toRemoteMove = m => ({
+  id: m.id, produto_id: m.productId, produto: m.name, tipo: m.type, delta: m.delta, antes: m.before, depois: m.after,
+  preco: m.price ?? null, fornecedor: m.supplier || null, pedido_id: m.orderId || null, obs: m.note || null, por_nome: m.by, feito_em: m.at,
+});
+const fromRemoteMove = r => ({
+  id: r.id, productId: r.produto_id, name: r.produto, type: r.tipo, delta: r.delta, before: r.antes, after: r.depois,
+  price: r.preco != null ? Number(r.preco) : null, supplier: r.fornecedor || '', orderId: r.pedido_id || null, note: r.obs || '', by: r.por_nome,
+  at: new Date(r.feito_em).toISOString(),
+});
+const toRemoteOrder = o => ({
+  id: o.id, fornecedor: o.supplier, itens: (o.items || []).map(i => ({ id: i.id, nome: i.name, qtd: i.qty, preco: i.price ?? null, recebido: i.received ?? null })), status: o.status, criado_em: o.createdAt, criado_por: o.createdBy || null,
+  recebido_em: o.receivedAt || null, recebido_por: o.receivedBy || null, atualizado_em: o.updatedAt,
+});
+const fromRemoteOrder = r => ({
+  id: r.id, supplier: r.fornecedor, items: (r.itens || []).map(i => ({ id: i.id, name: i.nome, qty: i.qtd, price: i.preco ?? null, received: i.recebido ?? undefined })), status: r.status, createdAt: new Date(r.criado_em).toISOString(), createdBy: r.criado_por,
+  receivedAt: r.recebido_em ? new Date(r.recebido_em).toISOString() : null, receivedBy: r.recebido_por, updatedAt: new Date(r.atualizado_em).toISOString(),
 });
 const toRemoteCount = c => ({
   id: c.id, dia: c.date, feita_em: c.at, por_nome: c.by, por_papel: c.role, itens: c.items || [],
@@ -117,7 +136,11 @@ export async function countPending() {
   const ps = await db.all('products');
   const cs = await db.all('counts');
   const cfg = await db.get('settings', 'scheduleDirty');
-  return ps.filter(p => p._dirty || p._photoDirty).length + cs.filter(c => c._dirty).length + (cfg ? 1 : 0);
+  const os = await db.all('orders');
+  // movimentos vão junto com o produto (não contam como pendência à parte)
+  const ms = (await db.all('moves')).filter(m => m._dirty && !ps.some(p => p.id === m.productId && p._dirty));
+  return ps.filter(p => p._dirty || p._photoDirty).length + cs.filter(c => c._dirty).length + (cfg ? 1 : 0)
+    + ms.length + os.filter(o => o._dirty).length;
 }
 
 export function requestSync() {
@@ -152,10 +175,14 @@ async function syncOnce() {
     await pushConfig();
     await pushProducts();
     await pushCounts();
+    await pushMoves();
+    await pushOrders();
     // 3) baixa o que mudou
     changed = (await pullConfig()) || changed;
     changed = (await pullProducts()) || changed;
     changed = (await pullCounts()) || changed;
+    changed = (await pullMoves()) || changed;
+    changed = (await pullOrders()) || changed;
     changed = (await downloadPhotos()) || changed;
     state.status = 'ok';
     state.error = null;
@@ -220,6 +247,49 @@ async function pushCounts() {
   const { error } = await sb().from('conferencias').upsert(dirty.map(toRemoteCount), { onConflict: 'id', ignoreDuplicates: true });
   if (error) throw error;
   for (const c of dirty) { delete c._dirty; await db.put('counts', c); }
+}
+
+async function pushMoves() {
+  const dirty = (await db.all('moves')).filter(m => m._dirty);
+  if (!dirty.length) return;
+  const { error } = await sb().from('movimentos').upsert(dirty.map(toRemoteMove), { onConflict: 'id', ignoreDuplicates: true });
+  if (error) throw error;
+  for (const m of dirty) { delete m._dirty; await db.put('moves', m); }
+}
+
+async function pushOrders() {
+  const dirty = (await db.all('orders')).filter(o => o._dirty);
+  for (const o of dirty) {
+    const { error } = await sb().from('pedidos').upsert(toRemoteOrder(o), { onConflict: 'id' });
+    if (error) throw error;
+    const cur = await db.get('orders', o.id);
+    if (cur && cur.updatedAt === o.updatedAt) { delete cur._dirty; await db.put('orders', cur); }
+  }
+}
+
+async function pullMoves() {
+  const rows = await pullTable('movimentos', 'pull-movimentos');
+  let changed = false;
+  for (const r of rows) {
+    if (await db.get('moves', r.id)) continue;
+    await db.put('moves', fromRemoteMove(r));
+    changed = true;
+  }
+  return changed;
+}
+
+async function pullOrders() {
+  const rows = await pullTable('pedidos', 'pull-pedidos');
+  let changed = false;
+  for (const r of rows) {
+    const remote = fromRemoteOrder(r);
+    const local = await db.get('orders', r.id);
+    if (local && local._dirty && Date.parse(local.updatedAt) > Date.parse(remote.updatedAt)) continue;
+    if (local && local.updatedAt === remote.updatedAt && local.status === remote.status) continue;
+    await db.put('orders', remote);
+    changed = true;
+  }
+  return changed;
 }
 
 // Baixa linhas alteradas desde a última vez (com 2 min de folga para não perder nada).
@@ -302,7 +372,7 @@ export function startAuto() {
   if (CONFIG.realtime) {
     try {
       channel = sb().channel('kf-estoque');
-      for (const table of ['produtos', 'conferencias', 'config']) {
+      for (const table of ['produtos', 'conferencias', 'config', 'movimentos', 'pedidos']) {
         channel.on('postgres_changes', { event: '*', schema: 'public', table }, syncSoon);
       }
       channel.subscribe();
@@ -326,3 +396,16 @@ export async function pushSave(sub) {
   if (error) throw new Error(msg(error));
 }
 export async function pushTest(endpoint, badge) { return pushFn({ acao: 'teste', endpoint, badge }); }
+
+// ---------- relatório mensal em PDF (versão 0.7) ----------
+async function reportFn(body) {
+  const { data: { session } } = await sb().auth.getSession();
+  if (!session) throw new Error('Entre na conta primeiro.');
+  const r = await fetch(`${CONFIG.url}/functions/v1/kf-relatorio`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', apikey: CONFIG.key, 'x-kf-token': session.access_token }, body: JSON.stringify(body),
+  });
+  if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.erro || `HTTP ${r.status}`); }
+  return r;
+}
+export async function reportPdf(month) { return (await reportFn({ acao: 'baixar', mes: month })).blob(); }
+export async function reportEmail(month) { return (await reportFn({ acao: 'email', mes: month })).json(); }

@@ -504,6 +504,101 @@ try {
     await shot(op, '15-produto-validade');
   });
 
+  // ================= versão 0.7 =================
+  const prod = name => fake.tables.produtos.find(p => p.nome === name);
+  await step('preço e código de barras no cadastro; movimentos chegam no servidor', async () => {
+    const al = prod('Álcool 70% 1L');
+    await nav(op, '#editar/' + al.id);
+    await op.fill('#pr', '12,50');
+    await op.fill('#bc', '7891234567895');
+    await op.click('#save');
+    await waitHash(op, '#produto/');
+    await synced(op);
+    assert.equal(Number(prod('Álcool 70% 1L').preco), 12.5);
+    assert.equal(prod('Álcool 70% 1L').codigo_barras, '7891234567895');
+    assert.match(await op.textContent('.facts'), /Preço unitário\s*R\$\s*12,50/);
+    const tipos = new Set(fake.tables.movimentos.map(m => m.tipo));
+    assert.ok(tipos.has('conferencia') && tipos.has('saida') && tipos.has('entrada'), 'tipos: ' + [...tipos].join(','));
+    assert.ok(fake.tables.movimentos.every(m => m.por_user && m.por_nome));
+  });
+
+  await step('registrar entrada com validade cria lote e entra no gasto', async () => {
+    const al = prod('Álcool 70% 1L');
+    const before = Number(al.quantidade);
+    await nav(op, '#produto/' + al.id);
+    await op.fill('#in-q', '10');
+    await op.fill('#in-d', '2027-03-10');
+    await op.click('#in-f button[type=submit]');
+    await op.waitForFunction(() => /2027|10\/03/.test(document.querySelector('ul.lots')?.textContent || ''));
+    await synced(op);
+    const a = prod('Álcool 70% 1L');
+    assert.equal(a.quantidade, before + 10);
+    assert.deepEqual(a.lotes.map(l => [l.validade, l.qtd]), [['2027-03-10', 10]]);
+    const m = fake.tables.movimentos.filter(x => x.produto === 'Álcool 70% 1L' && x.tipo === 'entrada').pop();
+    assert.deepEqual([m.delta, Number(m.preco)], [10, 12.5]);
+    // as unidades antigas viram um lote vencido e são descartadas como perda
+    await op.fill('#lot-d', '2026-11-30');
+    await op.click('#lot-f button[type=submit]');
+    await op.waitForSelector('[data-discard]');
+    assert.match(await op.textContent('ul.lots li:first-child'), /Usar primeiro/);
+    await shot(op, '16-lotes');
+    await op.click('[data-discard]');
+    await op.waitForFunction(() => !document.querySelector('[data-discard]'));
+    await synced(op);
+    const b = prod('Álcool 70% 1L');
+    assert.equal(b.quantidade, 10);
+    assert.equal(String(b.validade).slice(0, 10), '2027-03-10');
+    assert.ok(fake.tables.movimentos.some(x => x.tipo === 'perda' && x.produto === 'Álcool 70% 1L' && x.delta === -before));
+  });
+
+  await step('pedido de compra: pedido feito, recebido com validade entra no estoque', async () => {
+    await nav(op, '#painel');
+    const grp = op.locator('.supplier', { hasText: 'Mercado Livre' });
+    assert.match(await grp.locator('a', { hasText: 'WhatsApp' }).getAttribute('href'), /^https:\/\/wa\.me\/\?text=.*Agulha%2031G/);
+    await grp.locator('[data-order]').click();
+    await op.waitForSelector('.order-tag');
+    await synced(op);
+    const o = fake.tables.pedidos.find(x => x.fornecedor === 'Mercado Livre');
+    assert.equal(o.status, 'feito');
+    assert.equal(o.itens[0].nome, 'Agulha 31G');
+    await op.click('.order-tag');
+    await waitHash(op, '#pedido/');
+    await op.waitForSelector('#rcv'); await op.waitForTimeout(900);
+    await shot(op, '17-pedido');
+    const agQ = prod('Agulha 31G').quantidade;
+    const want = o.itens[0].qtd;
+    // Agulha é ND: não pede validade
+    await op.click('#rcv button[type=submit]');
+    await waitHash(op, '#painel');
+    await synced(op);
+    assert.equal(fake.tables.pedidos.find(x => x.id === o.id).status, 'recebido');
+    assert.equal(prod('Agulha 31G').quantidade, agQ + want);
+    assert.ok(fake.tables.movimentos.some(x => x.pedido_id === o.id && x.tipo === 'entrada' && x.fornecedor === 'Mercado Livre'));
+  });
+
+  await step('leitor de código de barras abre o produto (Estoque) e acha o item (Conferência)', async () => {
+    await nav(op, '#estoque');
+    await op.evaluate(() => { window.__KF_FAKE_SCAN = '7891234567895'; });
+    await op.click('#l-scan');
+    await waitHash(op, '#produto/');
+    assert.equal(await op.textContent('h2'), 'Álcool 70% 1L');
+    await op.evaluate(() => { delete window.__KF_FAKE_SCAN; });
+  });
+
+  await step('relatórios: resumo do mês com gasto, perdas e fornecedores', async () => {
+    await nav(op, '#historico');
+    const t = (await op.textContent('main')).replace(/\s+/g, ' ');
+    assert.match(t, /Resumo do mês/);
+    assert.match(t, /Gasto no mês\s*R\$\s*125,00/);
+    assert.match(t, /Perdas \(vencidos\)\s*R\$\s*\d/);
+    assert.match(t, /Gasto por fornecedor/);
+    await op.screenshot({ path: path.join(SHOTS, '18-relatorios.png'), fullPage: true });
+    // tocar de novo na aba atual volta ao topo
+    await op.evaluate(() => window.scrollTo(0, 900));
+    await op.click('#tabs a[data-tab=historico]');
+    await op.waitForFunction(() => window.scrollY === 0);
+  });
+
   await step('revisão visual: todas as telas no tamanho do iPhone (390x844)', async () => {
     mkdirSync(path.join(SHOTS, 'qa'), { recursive: true });
     const id = fake.tables.produtos.find(p => p.nome === 'Álcool 70% 1L').id;
@@ -517,7 +612,7 @@ try {
         // nada pode passar da largura da tela
         const over = await pg.evaluate(() => [...document.querySelectorAll('main *')].filter(e => { if (e.closest('.face-tap, .chips, .hscroll')) return false; const b = e.getBoundingClientRect(); return b.width && (b.right > innerWidth + 1 || b.left < -1); }).slice(0, 5).map(e => e.tagName + '.' + e.className + '#' + e.id));
         assert.deepEqual(over, [], `${who} ${r}: elementos passando da tela`);
-        if (r.startsWith('#editar')) { await pg.evaluate(() => document.querySelector('.vrow').scrollIntoView({ block: 'center' })); await pg.waitForTimeout(300); await pg.screenshot({ path: path.join(SHOTS, 'qa', 'vrow.png') }); }
+        if (r.startsWith('#editar')) { await pg.evaluate(() => document.querySelector('.vrow, .lot-note').scrollIntoView({ block: 'center' })); await pg.waitForTimeout(300); await pg.screenshot({ path: path.join(SHOTS, 'qa', 'vrow.png') }); }
         await pg.screenshot({ path: path.join(SHOTS, 'qa', `${who}-${r.slice(1).replace(/\//g, '_').slice(0, 20)}.png`), fullPage: true });
       }
     }
@@ -529,6 +624,10 @@ try {
     await nav(op, '#painel');
     await op.waitForFunction(() => document.querySelector('.since')?.classList.contains('red'));
     assert.match(await op.textContent('.since .n'), /^3$/);
+    const lu = fake.tables.produtos.find(p => p.nome === 'Agulha 31G');
+    await nav(op, '#produto/' + lu.id);
+    console.log('       consumo (Agulha 31G):', (await op.textContent('.stats')).replace(/\s+/g, ' ').trim().slice(0, 160));
+    await nav(op, '#painel');
     await op.waitForTimeout(700);
     await op.screenshot({ path: path.join(SHOTS, 'qa', 'radar-3-dias.png'), clip: { x: 0, y: 0, width: 390, height: 844 } });
     await setTime(op, new Date(before).toISOString());

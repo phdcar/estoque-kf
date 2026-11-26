@@ -60,6 +60,21 @@ select quantidade = 3 as upsert_ok from public.produtos;
 -- fornecedor e categoria (versão 0.3)
 update public.produtos set fornecedor = 'Cremer', categoria = 'Insumos', atualizado_em = '2026-11-26T13:00Z';
 select fornecedor = 'Cremer' and categoria = 'Insumos' as fornecedor_ok from public.produtos;
+-- versão 0.7: preço, código de barras, lotes, movimentos e pedidos
+update public.produtos set preco = 12.5, codigo_barras = '7891234567890', lotes = '[{"id":"l1","validade":"2027-01-10","qtd":2}]', atualizado_em = '2026-11-26T14:00Z';
+select preco = 12.5 and lotes->0->>'validade' = '2027-01-10' as preco_lotes_ok from public.produtos;
+insert into public.movimentos(id,produto_id,produto,tipo,delta,antes,depois,preco,por_nome,feito_em)
+  values (gen_random_uuid(),'11111111-1111-1111-1111-111111111111','Luva','saida',-1,3,2,12.5,'Bruna',now());
+select por_user = :FUNC::uuid as mov_por_user from public.movimentos;
+select pg_temp.esperar_erro($$insert into public.movimentos(id,produto_id,produto,tipo,delta,antes,depois,por_nome,feito_em) values (gen_random_uuid(),gen_random_uuid(),'x','roubo',-1,1,0,'B',now())$$, 'check');
+select pg_temp.esperar_erro($$update public.movimentos set delta = 5$$, 'permission denied');
+select pg_temp.esperar_erro($$delete from public.movimentos$$, 'permission denied');
+insert into public.pedidos(id,fornecedor,itens,status,criado_em,criado_por,atualizado_em)
+  values ('22222222-2222-2222-2222-222222222222','Cremer','[{"nome":"Luva","qtd":5}]','feito','2026-11-26T10:00Z','Bruna','2026-11-26T10:00Z');
+update public.pedidos set status = 'cancelado', atualizado_em = '2026-11-26T09:00Z';
+select status = 'feito' as pedido_antigo_ignorado from public.pedidos;
+update public.pedidos set status = 'recebido', recebido_em = now(), atualizado_em = '2026-11-26T11:00Z';
+select status = 'recebido' as pedido_recebido from public.pedidos;
 -- fotos
 insert into storage.objects(bucket_id, name) values ('fotos', 'a/b.jpg');
 select pg_temp.esperar_erro($$insert into storage.objects(bucket_id, name) values ('outro', 'a')$$, 'row-level security');
@@ -72,8 +87,9 @@ select public.kf_remover_membro(:FUNC); select count(*) = 1 as func_removido fro
 -- removido perde acesso
 select set_config('request.jwt.claim.sub', :FUNC, false);
 select count(*) = 0 as removido_sem_acesso from public.produtos;
+select count(*) = 0 as removido_sem_movimentos from public.movimentos;
 -- anônimo não vê nada
 reset role; set role anon;
 select pg_temp.esperar_erro($$select * from public.produtos$$, 'permission denied');
 reset role;
-select count(*) = 3 as realtime_tabelas from pg_publication_tables where pubname = 'supabase_realtime';
+select count(*) = 5 as realtime_tabelas from pg_publication_tables where pubname = 'supabase_realtime';

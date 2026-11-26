@@ -571,3 +571,102 @@ nav.tabs a::after { top: 6px; }
 .since.ok { border-color: var(--green-line); }
 .since.ok .ic { background: rgba(158,210,181,.14); color: var(--green); box-shadow: 0 0 0 1px var(--green-line); }
 .since.gold .ic { background: rgba(205,178,126,.14); color: var(--gold); box-shadow: 0 0 0 1px rgba(205,178,126,.4); }
+
+/* =====================================================================
+   v0.7: consumo, lotes, pedidos, custos, relatório e leitor de código
+   ===================================================================== */
+.small-btn { min-height: 40px; padding: 8px 14px; font-size: 14px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; width: auto; }
+.small-btn svg, .icon-btn svg { width: 18px; height: 18px; }
+.icon-btn { width: 48px; min-height: 48px; padding: 0; display: inline-grid; place-items: center; border-radius: 12px; flex: none; font-size: 22px; }
+.search-row { display: flex; gap: 10px; align-items: center; margin: 14px 0 4px; }
+.search-row .search { flex: 1; margin: 0; }
+.search-row > span { flex: 1; }
+.bc-row { display: flex; gap: 8px; }
+.bc-row input { min-width: 0; flex: 1; }
+.lot-note { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 12px; border: 1px dashed rgba(205,178,126,.4); color: #E9E3D8; font-size: 14px; }
+.lot-note svg { width: 18px; height: 18px; color: var(--gold); flex: none; margin-top: 2px; }
+.count-tools { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 6px 0 4px; }
+li.count-item.flash { border-color: var(--gold); box-shadow: 0 0 0 2px rgba(205,178,126,.5), 0 0 24px rgba(205,178,126,.3); transition: box-shadow .3s; }
+
+.pill.fc svg { width: 12px; height: 12px; }
+.pill.red-soft { background: rgba(224,121,111,.16); color: #F4B1A9; border: 1px solid var(--red-line); }
+.pill.gold { background: rgba(205,178,126,.16); color: var(--gold-hi); border: 1px solid rgba(205,178,126,.45); font-size: 11px; }
+
+.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 18px; }
+.stat span { display: block; font-size: 12.5px; color: var(--muted); }
+.stat b { display: block; font-size: 17px; font-weight: 500; margin-top: 3px; color: #F6EFE2; }
+.stat b.red { color: #F4B1A9; } .stat b.amber { color: var(--amber); }
+.stat small { display: block; font-size: 12px; color: var(--mute); margin-top: 3px; line-height: 1.35; }
+.stat.wide { grid-column: 1 / -1; padding-top: 14px; border-top: 1px solid var(--hair); }
+.stat .small-btn { margin-top: 10px; }
+
+ul.lots { list-style: none; margin: 0 0 6px; padding: 0; }
+ul.lots li { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--hair); }
+ul.lots li:last-child { border-bottom: 0; }
+ul.lots li > div { flex: 1; min-width: 0; }
+ul.lots li b { font-weight: 500; }
+ul.lots li small { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+ul.lots li .q { font-size: 17px; white-space: nowrap; }
+ul.lots li.amber small { color: var(--amber); } ul.lots li.red small, ul.lots li.red .q { color: #F4B1A9; }
+.inline-form label:first-child, .inline-form .row:first-child label { margin-top: 0; }
+.inline-form > button { margin-top: 14px; }
+form.inline-form#lot-f { margin-top: 12px; padding-top: 14px; border-top: 1px solid var(--hair); }
+
+.moves .mv { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--hair); }
+.moves .mv:last-child { border-bottom: 0; }
+.moves .mv .t { font-size: 14.5px; }
+.moves .mv small { display: block; font-size: 12px; color: var(--mute); }
+.moves .mv b { font-size: 17px; font-weight: 500; } .moves .mv b.neg { color: #F4B1A9; } .moves .mv b.pos { color: var(--green); }
+
+.sup-actions { display: flex; gap: 10px; margin: 10px 0 18px; }
+.sup-actions > * { flex: 1; }
+.order-tag { display: flex; align-items: center; gap: 8px; margin: 10px 0 18px; padding: 10px 12px; border-radius: 12px; font-size: 13.5px; text-decoration: none;
+  color: var(--gold-hi); border: 1px solid rgba(205,178,126,.4); background: rgba(205,178,126,.08); }
+.order-tag svg { width: 16px; height: 16px; }
+.orders .it, .months .it { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--hair); text-decoration: none; color: inherit; font-size: 14.5px; }
+.orders .it:last-child, .months .month:last-child .it:last-child { border-bottom: 0; }
+.orders .it small { display: block; font-size: 12px; color: var(--mute); margin-top: 2px; }
+.orders .q, .months .q { white-space: nowrap; font-size: 13.5px; color: var(--muted); }
+.q.gold { color: var(--gold-hi); font-weight: 500; } .q.ok { color: var(--green); }
+.months .month + .month { margin-top: 10px; }
+.months .mh { display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 6px; border-bottom: 1px solid rgba(205,178,126,.3); }
+.months .mh b { font-family: var(--serif); font-weight: 500; font-size: 16px; }
+.months .mh span { font-size: 12.5px; color: var(--muted); }
+.months .month.over .mh b, .months .month.over .q { color: #F4B1A9; }
+
+.order-items .oi { padding: 14px 0; border-bottom: 1px solid var(--hair); }
+.order-items .oi:first-child { padding-top: 0; }
+.order-items .oi:last-of-type { border-bottom: 0; }
+.order-items .oh b { font-weight: 500; font-size: 15.5px; }
+.order-items .oh small { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.order-items label { margin-top: 10px; font-size: 13px; }
+.order-items > button { margin-top: 16px; }
+
+.month-nav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 10px 0 16px; }
+.month-nav b { font-family: var(--serif); font-weight: 500; font-size: 19px; }
+.month-nav .icon-btn:disabled { opacity: .3; }
+.kpi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.kcard { padding: 16px; border-radius: 18px; border: 1px solid rgba(243,239,231,.08); background: linear-gradient(165deg, rgba(243,239,231,.06), rgba(243,239,231,.02)); min-width: 0; }
+.kcard span { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); }
+.kcard span svg { width: 16px; height: 16px; color: var(--gold); flex: none; }
+.kcard b { display: block; font-size: 21px; font-weight: 400; margin: 8px 0 2px; color: #FBF6EC; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kcard small { font-size: 12px; color: var(--mute); line-height: 1.3; display: block; }
+.kcard.bad b { color: #F4B1A9; }
+.bars .br + .br { margin-top: 14px; }
+.bars .t { display: flex; justify-content: space-between; gap: 10px; font-size: 14.5px; }
+.bars .t b { font-weight: 500; white-space: nowrap; }
+.bars .b { height: 6px; border-radius: 3px; background: rgba(243,239,231,.08); margin: 6px 0 3px; overflow: hidden; }
+.bars .b i { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, #9A7A44, #CDB27E 60%, #F3E6C4); }
+.bars small { font-size: 12px; color: var(--mute); }
+
+/* leitor de código de barras */
+.scanner { position: fixed; inset: 0; z-index: 50; background: rgba(6,10,16,.96); display: flex; flex-direction: column; padding: calc(14px + var(--safe-t)) 18px calc(18px + var(--safe-b)); gap: 14px; }
+.scan-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; color: var(--ivory); font-size: 15px; }
+.scan-top button { width: auto; min-height: 40px; }
+.scan-view { position: relative; flex: 1; min-height: 0; border-radius: 20px; overflow: hidden; background: #000; border: 1px solid rgba(205,178,126,.3); }
+.scan-view video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.scan-frame { position: absolute; left: 10%; right: 10%; top: 35%; height: 30%; border: 2px solid rgba(234,219,178,.9); border-radius: 14px; box-shadow: 0 0 0 9999px rgba(0,0,0,.35); }
+.scan-msg { margin: 0; text-align: center; color: var(--muted); font-size: 14px; }
+.scan-manual { display: flex; gap: 10px; }
+.scan-manual input { flex: 1; min-width: 0; }
+.scan-manual button { width: auto; padding: 0 18px; }

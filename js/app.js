@@ -6,8 +6,11 @@ import { illustrationFor, SKETCH_FILTER } from './illustrations.js';
 import { I } from './icons.js';
 import * as cloud from './cloud.js';
 import { startAmbient, skyState, PERIOD_NAME, tapURI } from './ambient.js';
+import { consumption, forecastDays, suggestLevels, rateText, forecastText, withQuantity, addLot, lotsTotal, sortedLots,
+  expiriesByMonth, stockValue, monthSummary, monthKey, brl, orderText, whatsappUrl } from './insights.js';
+import { scanBarcode } from './scanner.js';
 
-export const APP_VERSION = '0.6.3';
+export const APP_VERSION = '0.7.0';
 export { isLow };
 
 // ---------- utilidades ----------
@@ -23,6 +26,8 @@ const fmtDay = s => { const [y, m, d] = s.split('-'); return `${d}/${m}/${y}`; }
 const WEEK = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
 const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
 const weekday = s => { const [y, m, d] = s.split('-').map(Number); return WEEK[new Date(y, m - 1, d).getDay()]; };
+const MONTHS = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+const monthName = m => { const [y, mo] = m.split('-').map(Number); return `${MONTHS[mo - 1]} de ${y}`; };
 const fmtTime = iso => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const fmtDateTime = iso => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 const byName = (a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' });
@@ -55,6 +60,9 @@ const S = {
   schedule: null,         // { startDate: 'AAAA-MM-DD', deadline: 'HH:MM' }
   products: [],
   counts: [],
+  moves: [],              // movimentos (entrada, saída, ajuste, conferência, perda)
+  orders: [],             // pedidos de compra
+  cons: new Map(),        // id -> consumo calculado
   thumbs: new Map(),      // id -> { line, orig, key } (URLs de objeto)
 };
 
@@ -63,7 +71,31 @@ async function load() {
   S.schedule = await db.get('settings', 'schedule') || null;
   S.products = (await db.all('products')).filter(p => !p.deleted);
   S.counts = await db.all('counts');
+  S.moves = (await db.all('moves')).sort((a, b) => a.at.localeCompare(b.at));
+  S.orders = (await db.all('orders')).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  S.cons = new Map(S.products.map(p => [p.id, consumption(S.moves, p.id, now())]));
   updateBadge();
+}
+
+// ---------- movimentos de estoque ----------
+// Toda mudança de quantidade gera um movimento (para consumo, previsão, custo e relatório).
+function makeMove(p, after, type, extra = {}) {
+  return {
+    id: uuid(), productId: p.id, name: p.name, type, delta: after - Number(p.quantity), before: Number(p.quantity), after,
+    price: extra.price ?? (p.price ?? null), supplier: extra.supplier ?? (p.supplier || ''), orderId: extra.orderId || null,
+    note: extra.note || '', by: S.profile.name, at: now().toISOString(), _dirty: true,
+  };
+}
+const touch = p => ({ ...p, updatedAt: new Date().toISOString(), updatedBy: S.profile.name, _dirty: true });
+// muda a quantidade de um produto, ajusta os lotes e grava o movimento junto
+async function setQty(id, after, type, extra = {}) {
+  const p = await db.get('products', id);
+  if (!p || after < 0 || after === Number(p.quantity)) return p;
+  const m = makeMove(p, after, type, extra);
+  const next = touch(withQuantity(p, after));
+  await db.saveMoves([next], [m]);
+  cloud.syncSoon();
+  return next;
 }
 
 // número no ícone do app (iPhone com iOS 16.4+ e app instalado na tela de início; Android/Chrome)
@@ -161,7 +193,7 @@ function renderChrome(r) {
     ['painel', I.radar, 'Painel', alerts],
     ['estoque', I.box, 'Estoque'],
     ['conferencia', status().locked ? I.alert : I.check, 'Conferência'],
-    ...(isOwner() ? [['historico', I.calendar, 'Histórico']] : []),
+    ...(isOwner() ? [['historico', I.calendar, 'Relatórios']] : []),
     ['ajustes', I.gear, 'Ajustes'],
   ];
   const active = k => r.name === k || (k === 'estoque' && ['produto', 'novo', 'editar'].includes(r.name));
@@ -198,6 +230,7 @@ async function doRender() {
     case 'novo': return viewForm(null);
     case 'editar': return viewForm(r.arg);
     case 'produto': return viewProduct(r.arg);
+    case 'pedido': return viewOrder(r.arg);
     case 'estoque': return viewList(r.arg);
     case 'conferencia': return viewCount();
     case 'historico': return isOwner() ? viewHistory() : viewDashboard();
@@ -350,6 +383,12 @@ function expPill(p) {
   return `<span class="pill exp ${EXP_TONE[e]}" title="Validade ${fmtDay(p.expiry)}">${I.clock || ''}${expiryText(p, now())}</span>`;
 }
 
+function fcPill(p) {
+  const d = forecastDays(p, S.cons.get(p.id));
+  if (d == null || d > 21) return '';
+  return `<span class="pill fc ${d <= 7 ? 'red-soft' : 'amber'}" title="${forecastText(d)}">${I.trend}${d <= 0 ? 'acaba hoje' : `~${d} ${d === 1 ? 'dia' : 'dias'}`}</span>`;
+}
+
 function prodRow(p) {
   const l = level(p);
   const [label, tone] = LEVEL[l];
@@ -364,7 +403,7 @@ function prodRow(p) {
       <div class="info">
         <a class="name" href="#produto/${p.id}">${esc(p.name)}</a>
         <div class="meta">${meta}${miss.length ? `${meta ? ' · ' : ''}<span class="miss">Falta: ${miss.join(', ')}</span>` : ''}</div>
-        <div class="level"><span class="pill ${tone}">${label}</span>${expPill(p)}
+        <div class="level"><span class="pill ${tone}">${label}</span>${expPill(p)}${fcPill(p)}
           ${Number(p.min) >= 1 ? `<span class="bar ${tone}" title="${p.quantity} de ${p.min}"><i style="width:${pct}%"></i></span>` : ''}</div>
       </div>
       <div class="qty">
@@ -380,15 +419,10 @@ function bindQty(list) {
     const b = e.target.closest('button[data-act]');
     if (!b) return;
     const id = b.closest('li').dataset.id;
-    const p = await db.get('products', id);
+    const cur = await db.get('products', id);
     const delta = b.dataset.act === 'inc' ? 1 : -1;
-    if (p.quantity + delta < 0) return;
-    p.quantity += delta;
-    p.updatedAt = new Date().toISOString();
-    p.updatedBy = S.profile.name;
-    p._dirty = true;
-    await db.put('products', p);
-    cloud.syncSoon();
+    if (cur.quantity + delta < 0) return;
+    const p = await setQty(id, cur.quantity + delta, delta > 0 ? 'entrada' : 'saida');
     if (delta < 0 && isLow(p) && p.quantity + 1 >= p.min) toast(`${p.name} ficou abaixo do mínimo`);
     render();
   };
@@ -432,6 +466,8 @@ async function viewDashboard() {
   const atn = S.products.filter(p => level(p) === 'atencao').sort(byName);
   const inc = S.products.filter(p => missing(p).length).sort(byName);
   const list = shoppingList(S.products);
+  const openOrders = S.orders.filter(o => o.status === 'feito');
+  const months = expiriesByMonth(S.products, now(), 6);
   const h = now().getHours();
   const hello = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
   const today = now().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -473,9 +509,20 @@ async function viewDashboard() {
         <div class="supplier">
           <div class="hd"><b>${esc(g.supplier)}</b><span class="small muted">${plural(g.items.length, 'item', 'itens')}</span></div>
           ${g.items.map(i => `<a class="it" href="#produto/${i.id}"><span>${esc(i.name)}<small>tem ${i.quantity} · mínimo ${i.min}</small></span><span class="q">comprar ${i.need}</span></a>`).join('')}
+          ${(() => { const o = S.orders.find(x => x.status === 'feito' && x.supplier === g.supplier);
+            return o ? `<a class="order-tag" href="#pedido/${o.id}">${I.cart}Pedido feito em ${fmtDay(ymd(new Date(o.createdAt))).slice(0, 5)} · ver pedido</a>`
+              : `<div class="sup-actions"><a class="btn secondary small-btn" target="_blank" rel="noopener" href="${whatsappUrl(orderText(g.supplier, g.items.map(i => ({ qty: i.need, name: i.name })), now()))}">${I.chat}WhatsApp</a>
+                <button type="button" class="small-btn" data-order="${esc(g.supplier)}">${I.cart}Pedido feito</button></div>`; })()}
         </div>`).join('')}
       <button class="block gold" id="share">${I.share}Enviar lista de reposição</button>
     </div>` : ''}
+
+    ${openOrders.length ? `<h3>Pedidos em andamento (${openOrders.length})</h3>
+    <div class="card orders">${openOrders.map(o => `<a class="it" href="#pedido/${o.id}"><span>${esc(o.supplier)}<small>${plural(o.items.length, 'item', 'itens')} · feito em ${fmtDay(ymd(new Date(o.createdAt)))} por ${esc(o.createdBy || '—')}</small></span><span class="q gold">Receber</span></a>`).join('')}</div>` : ''}
+
+    ${months.length ? `<h3>Vencimentos por mês</h3>
+    <div class="card months">${months.map(m => `<div class="month ${m.overdue ? 'over' : ''}"><div class="mh"><b>${m.overdue ? 'Já vencidos' : cap(monthName(m.month))}</b><span>${plural(m.items.reduce((n, i) => n + i.qty, 0), 'unidade', 'unidades')}</span></div>
+      ${m.items.map(i => `<a class="it" href="#produto/${i.id}"><span>${esc(i.name)}</span><span class="q">${i.qty} un · ${fmtDay(i.expiry).slice(0, 5)}</span></a>`).join('')}</div>`).join('')}</div>` : ''}
 
     ${atn.length ? `<h3>No limite (${atn.length})</h3><ul class="list" id="wlist">${atn.map(prodRow).join('')}</ul>` : ''}
 
@@ -489,6 +536,14 @@ async function viewDashboard() {
     </div>` : ''}
     <p class="foot">Clínica KF · Estoque ${APP_VERSION}</p>`;
   for (const l of [$('#alist'), $('#wlist'), $('#elist')]) if (l) bindQty(l);
+  $$('[data-order]').forEach(b => b.onclick = async () => {
+    const g = list.find(x => x.supplier === b.dataset.order);
+    if (!g) return;
+    const ts = new Date().toISOString();
+    const o = { id: uuid(), supplier: g.supplier, status: 'feito', createdAt: ts, createdBy: S.profile.name, updatedAt: ts, _dirty: true,
+      items: g.items.map(i => { const pr = S.products.find(x => x.id === i.id); return { id: i.id, name: i.name, qty: i.need, price: pr?.price ?? null }; }) };
+    await db.put('orders', o); cloud.syncSoon(); toast(`Pedido para ${g.supplier} registrado.`); render();
+  });
   const sh = $('#share');
   if (sh) sh.onclick = async () => {
     const text = shoppingText(list, now());
@@ -505,6 +560,7 @@ async function viewDashboard() {
 
 // ---------- tela: lista de produtos ----------
 let searchTerm = '';
+let pendingBarcode = '';
 let category = '';
 const FILTERS = [['todos', 'Todos'], ['alerta', 'Abaixo do mínimo'], ['atencao', 'No limite'], ['ok', 'Em dia'], ['validade', 'Validade'], ['incompleto', 'Incompletos']];
 const matchFilter = (p, f) => f === 'alerta' ? isLow(p) : f === 'atencao' ? level(p) === 'atencao'
@@ -523,7 +579,8 @@ async function viewList(filter = 'todos') {
     ${low.length ? `<div class="banner red" id="low-banner">${I.alert}<span>${low.length} ${low.length === 1 ? 'produto abaixo' : 'produtos abaixo'} do mínimo: ${low.map(p => esc(p.name)).join(', ')}</span></div>` : ''}
     <div class="eyebrow">Estoque</div>
     <h2>Produtos <span class="muted" style="font-family:var(--sans);font-size:16px">(${S.products.length})</span></h2>
-    ${S.products.length > 5 ? `<div class="search">${I.search}<input type="search" id="q" placeholder="Buscar por nome ou fornecedor" value="${esc(searchTerm)}" aria-label="Buscar"></div>` : ''}
+    ${S.products.length ? `<div class="search-row">${S.products.length > 5 ? `<div class="search">${I.search}<input type="search" id="q" placeholder="Buscar por nome ou fornecedor" value="${esc(searchTerm)}" aria-label="Buscar"></div>` : '<span></span>'}
+      <button type="button" class="secondary small-btn" id="l-scan">${I.scan}Ler código</button></div>` : ''}
     ${S.products.length ? `<div class="chips" id="filters">${FILTERS.map(([k, t]) =>
       `<button type="button" class="chip ${k === filter ? 'on' : ''} ${k === 'alerta' ? 'red' : ''}" data-f="${k}">${t}<span class="c">${count(k)}</span></button>`).join('')}</div>` : ''}
     ${cats.length > 1 ? `<div class="chips" id="cats"><button type="button" class="chip ${!category ? 'on' : ''}" data-c="">Todas as categorias</button>${cats.map(c =>
@@ -539,12 +596,178 @@ async function viewList(filter = 'todos') {
       li.classList.toggle('hidden', !!t && !(`${p.name} ${p.supplier || ''}`).toLowerCase().includes(t));
     });
   };
+  const ls = $('#l-scan');
+  if (ls) ls.onclick = async () => {
+    const code = await scanBarcode();
+    if (!code) return;
+    const prod = S.products.find(x => x.barcode === code);
+    if (prod) return go('#produto/' + prod.id);
+    if (confirm(`O código ${code} não está em nenhum produto. Cadastrar um produto novo com esse código?`)) { pendingBarcode = code; go('#novo'); }
+  };
   const q = $('#q');
   if (q) { q.oninput = () => { searchTerm = q.value; applySearch(); }; applySearch(); }
   $$('#filters .chip').forEach(b => { b.onclick = () => go(b.dataset.f === 'todos' ? '#estoque' : '#estoque/' + b.dataset.f); });
   $$('#cats .chip').forEach(b => { b.onclick = () => { category = b.dataset.c; render(); }; });
   bindQty($('#plist'));
   await fillThumbs(main());
+}
+
+// ---------- produto: consumo, lotes, entrada e movimentos (versão 0.7) ----------
+const MOVE_NAME = { entrada: 'Entrada', saida: 'Saída', ajuste: 'Ajuste', conferencia: 'Conferência', perda: 'Perda (descarte)' };
+function productExtras(p) {
+  const c = S.cons.get(p.id);
+  const d = forecastDays(p, c);
+  const sug = suggestLevels(c);
+  const sugDiff = sug && (sug.min !== Number(p.min) || sug.ideal !== Number(p.ideal));
+  const lots = sortedLots(p);
+  const loose = Math.max(0, Number(p.quantity) - lotsTotal(p));
+  const nd = p.expiry === NO_EXPIRY;
+  const moves = S.moves.filter(m => m.productId === p.id).slice(-8).reverse();
+  return `
+    <h3>Consumo e previsão</h3>
+    <div class="card stats">
+      <div class="stat"><span>Consumo médio</span><b>${c && c.used ? rateText(c.perDay) : 'Sem consumo registrado'}</b>
+        <small>${c && c.used ? `${c.used} usados nos últimos ${c.days} ${c.days === 1 ? 'dia' : 'dias'}` : 'Aparece quando o estoque for usado (botão −, conferência).'}</small></div>
+      <div class="stat"><span>Previsão</span><b class="${d != null && d <= 7 ? 'red' : d != null && d <= 21 ? 'amber' : ''}">${d != null ? forecastText(d) : 'Ainda sem previsão'}</b>
+        <small>${d != null ? 'No ritmo de uso atual.' : 'Precisa de pelo menos 1 semana de uso registrado.'}</small></div>
+      ${sug ? `<div class="stat wide"><span>Sugestão pelo uso real</span><b>Alerta ${sug.min} · ideal ${sug.ideal}</b>
+        <small>Alerta = 1 semana de uso; ideal = 1 mês. Hoje: alerta ${Number(p.min) || '—'}, ideal ${Number(p.ideal) || '—'}.</small>
+        ${sugDiff ? `<button type="button" class="secondary small-btn" id="use-sug">Usar sugestão</button>` : ''}</div>` : ''}
+    </div>
+    ${nd ? '' : `
+    <h3>Lotes e validade</h3>
+    <div class="card">
+      ${lots.length ? `<ul class="lots">${lots.map((l, i) => {
+        const days = Math.round((Date.parse(l.expiry + 'T12:00:00') - now().getTime()) / 864e5);
+        const tone = days < 0 ? 'red' : days <= EXPIRY_SOON ? 'amber' : '';
+        return `<li class="${tone}"><div><b>${fmtDay(l.expiry)}</b>${i === 0 ? ' <span class="pill gold">Usar primeiro</span>' : ''}
+          <small>${days < 0 ? `Venceu há ${-days} ${-days === 1 ? 'dia' : 'dias'}` : days === 0 ? 'Vence hoje' : `Vence em ${days} ${days === 1 ? 'dia' : 'dias'}`}</small></div>
+          <span class="q">${l.qty} un</span>${days < 0 ? `<button type="button" class="danger small-btn" data-discard="${l.id}">Descartar</button>` : ''}</li>`; }).join('')}</ul>`
+        : `<p class="muted small" style="margin-top:0">Nenhum lote separado. ${p.expiry ? `Validade única: ${fmtDay(p.expiry)}.` : ''}</p>`}
+      ${loose > 0 ? `<p class="small muted">${plural(loose, 'unidade', 'unidades')} sem lote informado.</p>
+      <form class="inline-form" id="lot-f"><div class="row"><div><label for="lot-d">Validade do lote</label><input type="date" id="lot-d"></div>
+        <div><label for="lot-q">Quantidade</label><input type="number" id="lot-q" inputmode="numeric" min="1" max="${loose}" step="1" value="${loose}"></div></div>
+        <button type="submit" class="secondary block">${I.layers}Separar em lote</button></form>` : ''}
+    </div>`}
+    <h3>Registrar entrada</h3>
+    <form class="card inline-form" id="in-f">
+      <div class="row"><div><label for="in-q">Quantidade que chegou</label><input type="number" id="in-q" inputmode="numeric" min="1" step="1" placeholder="Ex.: 10"></div>
+        <div><label for="in-p">Preço unitário (R$)</label><input type="text" id="in-p" inputmode="decimal" placeholder="Opcional" value="${p.price != null ? Number(p.price).toFixed(2).replace('.', ',') : ''}"></div></div>
+      ${nd ? '' : `<label for="in-d">Validade deste lote</label><input type="date" id="in-d">`}
+      <div class="hint">Use quando chegar mercadoria fora de um pedido. A quantidade entra no estoque${nd ? '' : ' e o lote passa a contar na validade'}.</div>
+      <button type="submit" class="block">${I.inbox}Lançar entrada</button>
+    </form>
+    ${moves.length ? `<h3>Últimos movimentos</h3>
+    <div class="card moves">${moves.map(m => `<div class="mv"><span class="t">${MOVE_NAME[m.type] || m.type}<small>${fmtDateTime(m.at)} · ${esc(m.by)}</small></span>
+      <b class="${m.delta < 0 ? 'neg' : 'pos'}">${m.delta > 0 ? '+' : ''}${m.delta}</b></div>`).join('')}</div>` : ''}`;
+}
+
+const parsePrice = t => { const v = String(t || '').trim().replace(/\s|R\$/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.'); return /^\d+(\.\d{1,2})?$/.test(v) ? Number(v) : null; };
+
+function bindProductExtras(p) {
+  const us = $('#use-sug');
+  if (us) us.onclick = async () => {
+    const sug = suggestLevels(S.cons.get(p.id));
+    const cur = await db.get('products', p.id);
+    await db.put('products', touch({ ...cur, min: sug.min, ideal: sug.ideal }));
+    cloud.syncSoon(); toast(`Alerta ${sug.min} e ideal ${sug.ideal} salvos.`); render();
+  };
+  $$('[data-discard]').forEach(b => b.onclick = async () => {
+    const cur = await db.get('products', p.id);
+    const lot = (cur.lots || []).find(l => l.id === b.dataset.discard);
+    if (!lot || !confirm(`Descartar ${lot.qty} un vencidas em ${fmtDay(lot.expiry)}? Isso entra como perda no relatório.`)) return;
+    const after = Math.max(0, Number(cur.quantity) - Number(lot.qty));
+    const m = makeMove(cur, after, 'perda', { note: `Lote vencido em ${fmtDay(lot.expiry)}` });
+    const lots = (cur.lots || []).filter(l => l.id !== lot.id);
+    const next = touch({ ...cur, quantity: after, lots, expiry: lots.length ? sortedLots({ lots })[0].expiry : (after ? '' : cur.expiry) });
+    await db.saveMoves([next], [m]); cloud.syncSoon(); toast('Lote descartado.'); render();
+  });
+  const lf = $('#lot-f');
+  if (lf) lf.onsubmit = async e => {
+    e.preventDefault();
+    const d = $('#lot-d').value, q = Number($('#lot-q').value);
+    const cur = await db.get('products', p.id);
+    const loose = Number(cur.quantity) - lotsTotal(cur);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return toast('Informe a validade do lote.');
+    if (!(q >= 1 && q <= loose)) return toast(`A quantidade precisa ser de 1 a ${loose}.`);
+    await db.put('products', touch(addLot(cur, { id: uuid(), expiry: d, qty: q })));
+    cloud.syncSoon(); toast('Lote separado.'); render();
+  };
+  $('#in-f').onsubmit = async e => {
+    e.preventDefault();
+    const q = Number($('#in-q').value);
+    if (!(Number.isInteger(q) && q >= 1)) return toast('Informe quantas unidades chegaram.');
+    const pt = $('#in-p').value.trim();
+    const price = pt ? parsePrice(pt) : null;
+    if (pt && price == null) return toast('Preço inválido. Use só números, por exemplo 12,50.');
+    const d = $('#in-d')?.value || '';
+    const cur = await db.get('products', p.id);
+    const m = makeMove(cur, Number(cur.quantity) + q, 'entrada', { price: price ?? cur.price ?? null });
+    let next = { ...cur, quantity: Number(cur.quantity) + q, price: price ?? cur.price ?? null };
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d)) next = addLot(next, { id: uuid(), expiry: d, qty: q });
+    await db.saveMoves([touch(next)], [m]); cloud.syncSoon(); toast(`Entrada de ${q} lançada.`); render();
+  };
+}
+
+// ---------- tela: pedido de compra ----------
+async function viewOrder(id) {
+  const o = S.orders.find(x => x.id === id);
+  if (!o) return go('#painel');
+  const open = o.status === 'feito';
+  const pr = i => S.products.find(x => x.id === i.id);
+  main().innerHTML = `
+    <a class="back" href="#painel">${I.back}Painel</a>
+    <div class="eyebrow">Pedido de compra</div>
+    <h2>${esc(o.supplier)}</h2>
+    <p class="lead small">Feito em ${fmtDateTime(o.createdAt)} por ${esc(o.createdBy || '—')}.${o.status === 'recebido' ? ` Recebido em ${fmtDateTime(o.receivedAt)} por ${esc(o.receivedBy || '—')}.` : o.status === 'cancelado' ? ' Cancelado.' : ''}</p>
+    ${open ? `<div class="banner amber">${I.info}<span>Quando a mercadoria chegar, confira as quantidades, informe a validade de cada item e toque em <b>Recebido</b>. Tudo entra no estoque de uma vez.</span></div>` : ''}
+    <form id="rcv" class="card order-items" novalidate>
+      ${o.items.map((i, k) => { const p = pr(i); const nd = p?.expiry === NO_EXPIRY; return `
+        <div class="oi" data-k="${k}">
+          <div class="oh"><b>${esc(i.name)}</b><small>pedido: ${i.qty}${i.price != null ? ` · ${brl(i.price)} un` : ''}${p ? ` · tem ${p.quantity}` : ' · produto excluído'}</small></div>
+          ${open && p ? `<div class="row"><div><label>Chegou</label><input type="number" inputmode="numeric" min="0" step="1" class="r-q" value="${i.qty}"></div>
+            <div><label>Preço un. (R$)</label><input type="text" inputmode="decimal" class="r-p" value="${i.price != null ? Number(i.price).toFixed(2).replace('.', ',') : ''}" placeholder="Opcional"></div></div>
+            ${nd ? '<small class="muted">Sem validade (ND)</small>' : `<label>Validade</label><input type="date" class="r-d">`}`
+          : o.status === 'recebido' ? `<small>Recebido: <b>${i.received ?? i.qty}</b></small>` : ''}
+        </div>`; }).join('')}
+      ${open ? `<div id="rerr" class="banner red hidden"></div><button type="submit" class="block">${I.inbox}Recebido: lançar no estoque</button>` : ''}
+    </form>
+    ${open ? `<p><a class="btn secondary block" target="_blank" rel="noopener" href="${whatsappUrl(orderText(o.supplier, o.items.map(i => ({ qty: i.qty, name: i.name })), new Date(o.createdAt)))}">${I.chat}Enviar de novo pelo WhatsApp</a></p>
+    <p><button type="button" class="block danger" id="o-cancel">Cancelar pedido</button></p>` : ''}`;
+  if (!open) return;
+  $('#o-cancel').onclick = async () => {
+    if (!confirm('Cancelar este pedido?')) return;
+    await db.put('orders', { ...o, status: 'cancelado', updatedAt: new Date().toISOString(), _dirty: true });
+    cloud.syncSoon(); toast('Pedido cancelado.'); go('#painel');
+  };
+  $('#rcv').onsubmit = async e => {
+    e.preventDefault();
+    const err = t => { const b = $('#rerr'); b.textContent = t; b.classList.remove('hidden'); };
+    const products = [], moves = [], items = [];
+    for (const el of $$('.oi')) {
+      const i = o.items[Number(el.dataset.k)];
+      const cur = await db.get('products', i.id);
+      if (!cur || cur.deleted || !$('.r-q', el)) { items.push({ ...i, received: 0 }); continue; }
+      const q = Number($('.r-q', el).value);
+      if (!Number.isInteger(q) || q < 0) return err(`Quantidade inválida em ${i.name}.`);
+      const pt = $('.r-p', el).value.trim(); const price = pt ? parsePrice(pt) : null;
+      if (pt && price == null) return err(`Preço inválido em ${i.name}.`);
+      const d = $('.r-d', el)?.value || '';
+      if (q > 0 && cur.expiry !== NO_EXPIRY && !d) return err(`Informe a validade de ${i.name} (ou mude a quantidade para 0).`);
+      items.push({ ...i, received: q, price: price ?? i.price ?? null });
+      if (!q) continue;
+      moves.push(makeMove(cur, Number(cur.quantity) + q, 'entrada', { price: price ?? i.price ?? cur.price ?? null, supplier: o.supplier, orderId: o.id }));
+      let next = { ...cur, quantity: Number(cur.quantity) + q, price: price ?? cur.price ?? i.price ?? null };
+      if (d) next = addLot(next, { id: uuid(), expiry: d, qty: q });
+      products.push(touch(next));
+    }
+    const ts = new Date().toISOString();
+    const order = { ...o, items, status: 'recebido', receivedAt: ts, receivedBy: S.profile.name, updatedAt: ts, _dirty: true };
+    await db.saveMoves(products, moves, { order });
+    cloud.syncSoon();
+    toast(`Pedido recebido: ${plural(moves.reduce((n, m) => n + m.delta, 0), 'unidade lançada', 'unidades lançadas')} no estoque.`);
+    go('#painel');
+  };
 }
 
 // ---------- tela: detalhe do produto ----------
@@ -577,8 +800,11 @@ async function viewProduct(id) {
       <div><span>Comprar</span><b class="${isLow(p) ? 'red' : 'sm muted'}">${isLow(p) ? buy(p) : buy(p) ? `${buy(p)} <small>até o ideal</small>` : 'Nada agora'}</b></div>
       <div><span>Fornecedor</span><b class="${p.supplier ? 'sm' : 'miss'}">${p.supplier ? esc(p.supplier) : 'Não informado'}</b></div>
       <div><span>Categoria</span><b class="${p.category ? 'sm' : 'miss'}">${p.category ? esc(p.category) : 'Não informada'}</b></div>
+      <div><span>Preço unitário</span><b class="sm ${p.price != null ? '' : 'muted'}">${p.price != null ? brl(p.price) : 'Não informado'}</b></div>
+      <div><span>Valor em estoque</span><b class="sm ${p.price != null ? '' : 'muted'}">${p.price != null ? brl(p.price * p.quantity) : '—'}</b></div>
       <div class="wide"><span>Validade</span><b id="f-vl" class="sm ${!p.expiry ? 'miss' : ''} ${{ vencido: 'red', 'vence-logo': 'amber' }[expiryLevel(p, now())] || ''}">${p.expiry === NO_EXPIRY ? 'ND · sem validade' : p.expiry ? `${fmtDay(p.expiry)} <small>· ${expiryText(p, now())}</small>` : 'Não informada'}</b></div>
     </div>
+    ${productExtras(p)}
     <p class="small muted">Atualizado em ${fmtDateTime(p.updatedAt)}${p.updatedBy ? ' por ' + esc(p.updatedBy) : ''}.</p>
     <p><a class="btn block" href="#editar/${p.id}">${I.edit}Editar produto</a></p>
     <p><button class="block danger" id="del">${I.trash}Excluir produto</button></p>`;
@@ -588,6 +814,7 @@ async function viewProduct(id) {
       $('#big').src = b.dataset.v === 'orig' ? u.orig : u.line;
     });
   }
+  bindProductExtras(p);
   $('#del').onclick = async () => {
     if (!confirm(`Excluir "${p.name}"? Isso não pode ser desfeito.`)) return;
     const cur = await db.get('products', p.id);
@@ -631,12 +858,22 @@ async function viewForm(id) {
       <label for="id">Estoque ideal</label>
       <input id="id" type="number" inputmode="numeric" min="1" step="1" value="${p && Number(p.ideal) >= 1 ? p.ideal : ''}">
       <div class="hint">Opcional. A lista de compras sugere comprar até o ideal.</div>
+      <div class="row">
+        <div><label for="pr">Preço unitário (R$)</label>
+          <input id="pr" type="text" inputmode="decimal" maxlength="12" placeholder="Ex.: 12,50" value="${p?.price != null ? esc(Number(p.price).toFixed(2).replace('.', ',')) : ''}"></div>
+        <div><label for="bc">Código de barras</label>
+          <div class="bc-row"><input id="bc" type="text" inputmode="numeric" maxlength="40" value="${esc(p?.barcode || pendingBarcode || '')}" placeholder="Opcional">
+          <button type="button" class="secondary icon-btn" id="bc-scan" aria-label="Ler código de barras com a câmera">${I.scan}</button></div></div>
+      </div>
+      <div class="hint">O preço mostra quanto dinheiro está no estoque e quanto se gasta por mês. O código de barras deixa a conferência mais rápida.</div>
+      ${p && (p.lots || []).length ? `<label>Data de validade</label>
+      <div class="lot-note">${I.calendar}<span>Controlada pelos lotes: vence primeiro em <b>${fmtDay(sortedLots(p)[0]?.expiry || p.expiry)}</b>. Veja e altere os lotes na página do produto.</span></div>` : `
       <label for="vl">Data de validade ${req}</label>
       <div class="row vrow">
         <input id="vl" type="date" value="${p?.expiry && p.expiry !== NO_EXPIRY ? esc(p.expiry) : ''}" ${p?.expiry === NO_EXPIRY ? 'disabled' : ''}>
         <label class="nd"><input type="checkbox" id="nd" ${p?.expiry === NO_EXPIRY ? 'checked' : ''}><span>ND</span><small>sem validade</small></label>
       </div>
-      <div class="hint">Do lote que está na prateleira (o que vence primeiro). Vencidos ficam vermelhos; a ${EXPIRY_SOON} dias do vencimento o produto entra no radar.</div>
+      <div class="hint">Do lote que está na prateleira (o que vence primeiro). Vencidos ficam vermelhos; a ${EXPIRY_SOON} dias do vencimento o produto entra no radar.</div>`}
       <label>Foto</label>
       <div class="row">
         <button type="button" class="secondary" id="cam">${I.camera}Tirar foto</button>
@@ -652,7 +889,9 @@ async function viewForm(id) {
       <div id="err" class="banner red hidden" role="alert" style="margin:14px 0 0"></div>
       <p style="margin-top:16px"><button class="block" type="submit" id="save">Salvar</button></p>
     </form>`;
-  $('#nd').onchange = () => { $('#vl').disabled = $('#nd').checked; if ($('#nd').checked) $('#vl').value = ''; $('#vl').dispatchEvent(new Event('input')); };
+  pendingBarcode = '';
+  $('#bc-scan').onclick = async () => { const c = await scanBarcode('Leia o código de barras do produto'); if (c) $('#bc').value = c; };
+  if ($('#nd')) $('#nd').onchange = () => { $('#vl').disabled = $('#nd').checked; if ($('#nd').checked) $('#vl').value = ''; $('#vl').dispatchEvent(new Event('input')); };
   $('#cam').onclick = () => $('#f-cam').click();
   $('#gal').onclick = () => $('#f-gal').click();
   const onFile = async e => {
@@ -683,7 +922,10 @@ async function viewForm(id) {
     const sup = $('#fn').value.trim().replace(/\s+/g, ' ');
     const qt = $('#qt').value.trim(), mn = $('#mn').value.trim();
     const idl = $('#id').value.trim();
-    const nd = $('#nd').checked, vl = nd ? NO_EXPIRY : $('#vl').value.trim();
+    const lotted = !!(p && (p.lots || []).length);
+    const nd = !lotted && $('#nd').checked, vl = lotted ? p.expiry : nd ? NO_EXPIRY : $('#vl').value.trim();
+    const prTxt = $('#pr').value.trim().replace(/\s|R\$/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.');
+    const bc = $('#bc').value.trim();
     if (!name) return showErr('Informe o nome do produto.', 'nm');
     const dup = S.products.find(x => x.id !== p?.id && x.name.trim().toLowerCase() === name.toLowerCase());
     if (dup) return showErr(`Já existe um produto chamado "${dup.name}".`, 'nm');
@@ -694,17 +936,25 @@ async function viewForm(id) {
     if (idl && !/^\d+$/.test(idl)) return showErr('Estoque ideal: use um número inteiro.', 'id');
     if (!vl) return showErr('Informe a data de validade ou marque ND (sem validade).', 'vl');
     if (vl !== NO_EXPIRY && !/^\d{4}-\d{2}-\d{2}$/.test(vl)) return showErr('Data de validade inválida.', 'vl');
+    if (prTxt && !(/^\d+(\.\d{1,2})?$/.test(prTxt))) return showErr('Preço inválido. Use só números, por exemplo 12,50.', 'pr');
+    const dupBc = bc && S.products.find(x => x.id !== p?.id && x.barcode === bc);
+    if (dupBc) return showErr(`Esse código de barras já está no produto "${dupBc.name}".`, 'bc');
     $('#save').disabled = true;
     const ts = new Date().toISOString();
     const rec = p ? { ...(await db.get('products', p.id)) } : { id: uuid(), createdAt: ts, createdBy: S.profile.name };
-    Object.assign(rec, { name, category: cat, supplier: sup, quantity: Number(qt), min: Number(mn), ideal: idl ? Number(idl) : null, expiry: vl, updatedAt: ts, updatedBy: S.profile.name });
+    const oldQty = p ? Number(rec.quantity) : null;
+    Object.assign(rec, { name, category: cat, supplier: sup, min: Number(mn), ideal: idl ? Number(idl) : null, expiry: vl,
+      price: prTxt ? Number(prTxt) : null, barcode: bc, updatedAt: ts, updatedBy: S.profile.name });
+    const moves = [];
+    if (p && Number(qt) !== oldQty) { moves.push(makeMove(rec, Number(qt), 'ajuste', { note: 'Editado no cadastro' })); Object.assign(rec, withQuantity(rec, Number(qt))); }
+    else rec.quantity = Number(qt);
     rec._dirty = true;
     if (newPhoto) {
       rec._photoDirty = true;
       rec.photoKey = uuid();
       await db.put('photos', { id: rec.id, original: newPhoto.original, lineart: newPhoto.lineart, key: rec.photoKey });
     }
-    await db.put('products', rec);
+    await db.saveMoves([rec], moves);
     cloud.syncSoon();
     toast(p ? 'Produto atualizado' : 'Produto cadastrado');
     go('#produto/' + rec.id);
@@ -775,7 +1025,8 @@ async function viewCount(forceStart) {
     <div class="eyebrow">Conferência</div>
     <h2>Contagem do estoque</h2>
     <p class="muted small">Conte cada produto e digite a quantidade que existe de verdade na prateleira.</p>
-    <div class="small"><b id="done-n">0</b> de ${products.length} contados</div>
+    <div class="count-tools"><div class="small"><b id="done-n">0</b> de ${products.length} contados</div>
+      ${products.some(p => p.barcode) ? `<button type="button" class="secondary small-btn" id="c-scan">${I.scan}Ler código</button>` : ''}</div>
     <div class="progress"><div id="bar" style="width:0%"></div></div>
     <ul class="list" id="clist">
       ${products.map(p => `
@@ -804,6 +1055,17 @@ async function viewCount(forceStart) {
   };
   $('#clist').oninput = update;
   update();
+  const cs = $('#c-scan');
+  if (cs) cs.onclick = async () => {
+    const code = await scanBarcode('Leia o código do produto que vai contar');
+    if (!code) return;
+    const prod = products.find(x => x.barcode === code);
+    if (!prod) return toast('Esse código não está em nenhum produto.');
+    const li = $(`#clist li[data-id="${prod.id}"]`);
+    li.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    li.classList.add('flash'); setTimeout(() => li.classList.remove('flash'), 1600);
+    $('input', li).focus();
+  };
   $('#finish').onclick = async () => {
     const values = {};
     for (const li of $$('#clist li')) {
@@ -816,13 +1078,15 @@ async function viewCount(forceStart) {
     const fresh = (await db.all('products')).filter(p => !p.deleted);
     const items = [];
     const updated = [];
+    const moves = [];
     for (const p of fresh) {
       if (!(p.id in values)) continue; // produto criado durante a contagem
       items.push({ productId: p.id, name: p.name, before: p.quantity, counted: values[p.id] });
-      updated.push({ ...p, quantity: values[p.id], updatedAt: at, updatedBy: S.profile.name, _dirty: true });
+      if (values[p.id] !== Number(p.quantity)) moves.push(makeMove(p, values[p.id], 'conferencia'));
+      updated.push({ ...withQuantity(p, values[p.id]), updatedAt: at, updatedBy: S.profile.name, _dirty: true });
     }
     const count = { id: uuid(), date: ymd(now()), at: now().toISOString(), by: S.profile.name, role: S.profile.role, items, _dirty: true };
-    await db.saveCount(updated, count);
+    await db.saveMoves(updated, moves, { count });
     cloud.syncSoon();
     try { localStorage.removeItem(draftKey()); } catch { /* ignore */ }
     const lowNow = updated.filter(isLow).length;
@@ -833,6 +1097,7 @@ async function viewCount(forceStart) {
 }
 
 // ---------- tela: histórico (dono) ----------
+let reportMonth = '';
 async function viewHistory() {
   const st = status();
   const rows = S.schedule ? history({ now: now(), start: S.schedule.startDate, deadline: S.schedule.deadline, counts: S.counts, productDays: S.products.map(p => ymd(new Date(p.createdAt))) }) : [];
@@ -843,10 +1108,41 @@ async function viewHistory() {
   const all = S.counts.filter(c => !c.justification).sort((a, b) => b.at.localeCompare(a.at));
   const justs = S.counts.filter(c => c.justification).sort((a, b) => b.at.localeCompare(a.at));
   const diffs = c => c.items.filter(i => i.counted !== i.before);
+  const month = reportMonth || monthKey(now().toISOString());
+  const thisMonth = monthKey(now().toISOString());
+  const shift = (m, k) => { const [y, mo] = m.split('-').map(Number); const d = new Date(y, mo - 1 + k, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+  const ms = monthSummary(S.moves, month);
+  const sv = stockValue(S.products);
+  const mrows = S.schedule ? history({ now: now(), start: S.schedule.startDate, deadline: S.schedule.deadline, counts: S.counts, productDays: S.products.map(p => ymd(new Date(p.createdAt))), limit: 31 })
+    .filter(r => r.day.startsWith(month) && r.state !== 'sem-cobranca' && r.day !== ymd(now())) : [];
+  const cFeitas = mrows.filter(r => r.state === 'feita').length, cJust = mrows.filter(r => r.state === 'justificada').length, cNao = mrows.filter(r => r.state === 'nao-feita').length;
+  const mOrders = S.orders.filter(o => monthKey(o.createdAt) === month && o.status !== 'cancelado');
   main().innerHTML = `
     ${countBanner()}
-    <div class="eyebrow">Histórico</div>
-    <h2>Conferências</h2>
+    <div class="eyebrow">Relatórios</div>
+    <h2>Resumo do mês</h2>
+    <div class="month-nav"><button type="button" class="secondary icon-btn" id="m-prev" aria-label="Mês anterior">‹</button>
+      <b>${cap(monthName(month))}</b>
+      <button type="button" class="secondary icon-btn" id="m-next" aria-label="Próximo mês" ${month >= thisMonth ? 'disabled' : ''}>›</button></div>
+    <div class="kpi-grid">
+      <div class="kcard"><span>${I.money}Valor em estoque hoje</span><b>${brl(sv.value)}</b><small>${sv.missing ? `${plural(sv.missing, 'produto', 'produtos')} sem preço` : 'Todos os produtos com preço'}</small></div>
+      <div class="kcard"><span>${I.cart}Gasto no mês</span><b>${brl(ms.spend)}</b><small>Entradas de mercadoria</small></div>
+      <div class="kcard ${ms.losses ? 'bad' : ''}"><span>${I.trash}Perdas (vencidos)</span><b>${brl(ms.losses)}</b><small>${plural(ms.lossUnits, 'unidade descartada', 'unidades descartadas')}</small></div>
+      <div class="kcard ${cNao ? 'bad' : ''}"><span>${I.check}Conferências</span><b>${cFeitas} de ${mrows.length}</b><small>dias úteis${cJust ? ` · ${cJust} justificado${cJust > 1 ? 's' : ''}` : ''}${cNao ? ` · ${cNao} sem justificativa` : ''}</small></div>
+    </div>
+    ${ms.bySupplier.length ? `<h3>Gasto por fornecedor</h3><div class="card bars">${ms.bySupplier.map(x => `<div class="br"><div class="t"><span>${esc(x.supplier)}</span><b>${brl(x.value)}</b></div>
+      <div class="b"><i style="width:${ms.spend ? Math.max(3, Math.round(100 * x.value / ms.spend)) : 0}%"></i></div><small>${plural(x.units, 'unidade', 'unidades')}</small></div>`).join('')}</div>` : ''}
+    ${ms.usage.length ? `<h3>Mais usados no mês</h3><div class="card bars">${ms.usage.slice(0, 10).map(u => `<div class="br"><div class="t"><span>${esc(u.name)}</span><b>${u.units} un</b></div>
+      <div class="b"><i style="width:${Math.max(3, Math.round(100 * u.units / ms.usage[0].units))}%"></i></div>${u.value ? `<small>${brl(u.value)}</small>` : ''}</div>`).join('')}</div>` : ''}
+    ${mOrders.length ? `<h3>Pedidos do mês</h3><div class="card orders">${mOrders.map(o => `<a class="it" href="#pedido/${o.id}"><span>${esc(o.supplier)}<small>${fmtDay(ymd(new Date(o.createdAt)))} · ${plural(o.items.length, 'item', 'itens')}</small></span><span class="q ${o.status === 'recebido' ? 'ok' : 'gold'}">${o.status === 'recebido' ? 'Recebido' : 'Em andamento'}</span></a>`).join('')}</div>` : ''}
+    ${!ms.spend && !ms.usage.length && !mOrders.length ? `<p class="muted small">Ainda não há movimentos neste mês. O resumo se preenche conforme o estoque é usado, recebido e conferido.</p>` : ''}
+    <h3>Relatório em PDF</h3>
+    <div class="card">
+      <p class="small muted" style="margin-top:0">Todo dia 1º, o relatório do mês anterior chega no seu e-mail. Você também pode baixar ou enviar agora.</p>
+      <div class="row"><button type="button" class="secondary" id="pdf-dl">${I.download}Baixar PDF</button><button type="button" class="secondary" id="pdf-mail">${I.mail}Enviar por e-mail</button></div>
+      <p class="small muted hidden" id="pdf-st" style="margin-bottom:0"></p>
+    </div>
+    <h2 style="margin-top:44px">Conferências</h2>
     <div class="card small">Conferência diária, de segunda a sexta-feira, desde ${S.schedule ? fmtDay(S.schedule.startDate) : '—'}. Prazo: ${esc(S.schedule?.deadline || '18:00')}. Dia útil sem conferência precisa de justificativa.</div>
     <h3>Por dia útil</h3>
     ${rows.length ? `<div class="card" style="padding:4px 12px"><table class="hist days"><tbody>
@@ -868,6 +1164,24 @@ async function viewHistory() {
           ${diffs(c).map(i => `<tr><td>${esc(i.name)}</td><td>${i.before}</td><td class="${i.counted > i.before ? 'diff-pos' : 'diff-neg'}">${i.counted}</td></tr>`).join('')}
         </table></details>` : ''}
       </div>`).join('') : `<p class="muted">Nenhuma contagem registrada.</p>`}`;
+  $('#m-prev').onclick = () => { reportMonth = shift(month, -1); render(); };
+  $('#m-next').onclick = () => { if (month < thisMonth) { reportMonth = shift(month, 1); render(); } };
+  const pst = t => { const e = $('#pdf-st'); e.textContent = t; e.classList.remove('hidden'); };
+  $('#pdf-dl').onclick = async () => {
+    pst('Gerando o PDF…');
+    try {
+      const blob = await cloud.reportPdf(month);
+      const file = new File([blob], `estoque-kf-${month}.pdf`, { type: 'application/pdf' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'Relatório do estoque' }).catch(() => {}); }
+      else { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = file.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000); }
+      pst('PDF pronto.');
+    } catch (e) { pst('Não foi possível gerar o PDF: ' + cloud.errorText(e)); }
+  };
+  $('#pdf-mail').onclick = async () => {
+    pst('Enviando…');
+    try { const r = await cloud.reportEmail(month); pst(`Relatório enviado para ${r.para || 'o seu e-mail'}.`); }
+    catch (e) { pst('Não foi possível enviar: ' + cloud.errorText(e)); }
+  };
 }
 
 // ---------- tela: ajustes ----------
@@ -1032,6 +1346,13 @@ function renderSyncBadge() {
 
 // ---------- início ----------
 $('#defs').innerHTML = SKETCH_FILTER;
+// tocar de novo (ou dois toques) na aba em que você já está volta ao topo da tela, como no iPhone
+$('#tabs').addEventListener('click', e => {
+  const a = e.target.closest('a[data-tab]');
+  if (!a) return;
+  const cur = location.hash.replace(/^#\/?/, '') || 'painel';
+  if (cur === a.dataset.tab) { e.preventDefault(); window.scrollTo({ top: 0, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); }
+});
 $('#ver').textContent = 'versão ' + APP_VERSION;
 document.documentElement.style.setProperty('--tap-deep', tapURI(15, 'deep'));
 document.documentElement.style.setProperty('--tap-deephi', tapURI(15, 'deephi'));

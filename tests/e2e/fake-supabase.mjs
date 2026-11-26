@@ -14,6 +14,8 @@ export class FakeSupabase {
       config: [{ id: 1, inicio: new Date().toISOString().slice(0, 10), prazo: '18:00', codigo_convite: 'ABC123', atualizado_em: new Date().toISOString(), servidor_em: new Date().toISOString() }],
       produtos: [],
       conferencias: [],
+      movimentos: [],
+      pedidos: [],
     };
     this.files = new Map();   // caminho -> { body: Buffer, type }
     this.log = [];
@@ -161,11 +163,11 @@ export class FakeSupabase {
         const list = [].concat(body());
         for (const inc of list) {
           const cur = rows.find(r => r.id === inc.id);
-          if (table === 'conferencias') inc.por_user = uid;
+          if (table === 'conferencias' || table === 'movimentos') inc.por_user = uid;
           if (!cur) { rows.push({ ...inc, servidor_em: this.stamp() }); continue; }
           if (prefer.includes('ignore-duplicates')) continue;
           if (!prefer.includes('merge-duplicates')) return json(409, { code: '23505', message: 'duplicate key' });
-          if (table === 'produtos' && inc.atualizado_em < cur.atualizado_em) continue; // a mais recente vence
+          if ((table === 'produtos' || table === 'pedidos') && inc.atualizado_em < cur.atualizado_em) continue; // a mais recente vence
           Object.assign(cur, inc, { servidor_em: this.stamp() });
         }
         return json(201);

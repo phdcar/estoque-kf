@@ -1,6 +1,6 @@
 // Armazenamento local (IndexedDB). Tudo fica no aparelho até a etapa de sincronização.
 const DB_NAME = 'estoque-kf';
-const DB_VER = 1;
+const DB_VER = 2;
 let dbPromise;
 
 function openDB() {
@@ -9,10 +9,14 @@ function openDB() {
       const req = indexedDB.open(DB_NAME, DB_VER);
       req.onupgradeneeded = () => {
         const d = req.result;
-        d.createObjectStore('products', { keyPath: 'id' });
-        d.createObjectStore('photos', { keyPath: 'id' });
-        d.createObjectStore('counts', { keyPath: 'id' });
-        d.createObjectStore('settings');
+        const mk = (n, o) => { if (!d.objectStoreNames.contains(n)) d.createObjectStore(n, o); };
+        mk('products', { keyPath: 'id' });
+        mk('photos', { keyPath: 'id' });
+        mk('counts', { keyPath: 'id' });
+        mk('settings');
+        // versão 0.7: movimentos (entradas, saídas, perdas...) e pedidos de compra
+        mk('moves', { keyPath: 'id' });
+        mk('orders', { keyPath: 'id' });
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
@@ -47,8 +51,17 @@ export const db = {
   }),
   clearStore: (store) => run(store, 'readwrite', t => t.objectStore(store).clear()),
   // apaga os dados do estoque deste celular (ao sair da conta); a nuvem continua com tudo
-  clearData: () => run(['products', 'photos', 'counts', 'settings'], 'readwrite', t => {
-    ['products', 'photos', 'counts', 'settings'].forEach(n => t.objectStore(n).clear());
+  clearData: () => run(['products', 'photos', 'counts', 'settings', 'moves', 'orders'], 'readwrite', t => {
+    ['products', 'photos', 'counts', 'settings', 'moves', 'orders'].forEach(n => t.objectStore(n).clear());
+  }),
+  // grava produtos e movimentos (e opcionalmente outros registros) na mesma transação
+  saveMoves: (products, moves, extra = {}) => run(['products', 'moves', 'counts', 'orders'], 'readwrite', t => {
+    const ps = t.objectStore('products');
+    products.forEach(p => ps.put(p));
+    const ms = t.objectStore('moves');
+    moves.forEach(m => ms.put(m));
+    if (extra.count) t.objectStore('counts').put(extra.count);
+    if (extra.order) t.objectStore('orders').put(extra.order);
   }),
   // conferência: atualiza produtos e grava o registro na mesma transação
   saveCount: (products, count) => run(['products', 'counts'], 'readwrite', t => {
