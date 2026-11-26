@@ -23,7 +23,8 @@ body { min-height: 100vh; min-height: 100dvh; }
 header.top { position: sticky; top: 0; z-index: 5; background: var(--brand); color: #fff;
   padding: calc(12px + var(--safe-t)) 16px 12px; display: flex; align-items: center; gap: 10px; }
 header.top h1 { font-size: 18px; margin: 0; flex: 1; }
-header.top .who { font-size: 13px; opacity: .9; text-align: right; }
+header.top .who { font-size: 13px; opacity: .95; text-align: right; }
+header.top #sync { font-size: 12px; opacity: .9; }
 main { padding: 16px 16px calc(96px + var(--safe-b)); max-width: 720px; margin: 0 auto; }
 nav.tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; display: flex; background: #fff;
   border-top: 1px solid var(--line); padding-bottom: var(--safe-b); }

@@ -1,8 +1,9 @@
 // Service worker: guarda os arquivos do app para abrir sem internet.
-const VERSION = 'kf-estoque-v0.1.0';
+const VERSION = 'kf-estoque-v0.2.0';
 const ASSETS = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
-  'js/app.js', 'js/db.js', 'js/lineart.js', 'js/schedule.js',
+  'js/app.js', 'js/db.js', 'js/lineart.js', 'js/schedule.js', 'js/cloud.js', 'js/config.js',
+  'js/vendor/supabase.js', 'js/vendor/591.supabase.js',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/maskable-512.png',
 ];
 

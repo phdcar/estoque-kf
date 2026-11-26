@@ -1,8 +1,9 @@
 import { db } from './db.js';
 import { processPhoto } from './lineart.js';
 import { ymd, countStatus, history, isCountDay } from './schedule.js';
+import * as cloud from './cloud.js';
 
-export const APP_VERSION = '0.1.0';
+export const APP_VERSION = '0.2.0';
 
 // ---------- utilidades ----------
 const $ = (s, el = document) => el.querySelector(s);
@@ -20,15 +21,6 @@ const fmtTime = iso => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digi
 const fmtDateTime = iso => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 export const isLow = p => Number(p.quantity) < Number(p.min);
 const byName = (a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' });
-
-async function hashPin(pin) {
-  const data = new TextEncoder().encode('kf-estoque:' + pin);
-  if (crypto.subtle) {
-    const buf = await crypto.subtle.digest('SHA-256', data);
-    return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
-  }
-  return 'plain:' + pin;
-}
 
 function toast(msg) {
   for (const old of $$('.toast')) old.remove();
@@ -53,7 +45,6 @@ const now = () => new Date();
 const S = {
   profile: null,          // { role: 'dono' | 'funcionario', name }
   schedule: null,         // { startDate: 'AAAA-MM-DD', deadline: 'HH:MM' }
-  pinHash: null,
   products: [],
   counts: [],
   thumbs: new Map(),      // id -> { line, orig, key } (URLs de objeto)
@@ -62,7 +53,6 @@ const S = {
 async function load() {
   S.profile = await db.get('settings', 'profile') || null;
   S.schedule = await db.get('settings', 'schedule') || null;
-  S.pinHash = await db.get('settings', 'pinHash') || null;
   S.products = (await db.all('products')).filter(p => !p.deleted);
   S.counts = await db.all('counts');
 }
@@ -117,7 +107,8 @@ function go(hash) {
 
 function renderChrome(r) {
   $('#who').innerHTML = S.profile
-    ? `${esc(S.profile.name)}<br><span>${isOwner() ? 'Dono' : 'Funcionário'}</span>` : '';
+    ? `${esc(S.profile.name)} · ${isOwner() ? 'Dono' : 'Funcionário'}<br><span id="sync"></span>` : '';
+  renderSyncBadge();
   const tabs = $('#tabs');
   if (!S.profile) { tabs.classList.add('hidden'); return; }
   tabs.classList.remove('hidden');
@@ -170,53 +161,108 @@ function history_replace(hash) {
   window.history.replaceState(null, '', hash);
 }
 
-// ---------- tela: primeiro acesso ----------
-function viewSetup(step) {
-  if (!step) {
-    main().innerHTML = `
-      <h2>Bem-vindo!</h2>
-      <p>Quem vai usar este celular?</p>
-      <div class="choice">
-        <button id="be-owner">Sou o dono</button>
-        <button id="be-staff" class="secondary">Sou funcionário</button>
-      </div>`;
-    $('#be-owner').onclick = () => viewSetup('dono');
-    $('#be-staff').onclick = () => viewSetup('funcionario');
+// ---------- tela: entrar / criar conta ----------
+async function finishLogin(member) {
+  // dados guardados antes da sincronização (etapa 1) neste celular
+  if (!(await db.get('settings', 'cloudLinked'))) {
+    const old = (await db.all('products')).filter(p => !p.deleted);
+    if (old.length && confirm(`Este celular tem ${old.length} produto(s) cadastrado(s) antes da sincronização.\n\nOK: enviar para a nuvem.\nCancelar: apagar deste celular.`)) {
+      for (const p of old) await db.put('products', { ...p, _dirty: true, _photoDirty: !!p.photoKey });
+    } else {
+      await db.clearData();
+    }
+    await db.clearStore('counts'); // contagens antigas eram de teste
+    await db.put('settings', true, 'cloudLinked');
+  }
+  await db.put('settings', { role: member.papel, name: member.nome, userId: member.user_id, email: member.email }, 'profile');
+  cloud.startAuto();
+  await cloud.requestSync();
+  go('#estoque');
+}
+
+function viewSetup(mode = 'entrar', info = '') {
+  if (!cloud.configured()) {
+    main().innerHTML = `<div class="banner red">O app ainda não está ligado ao servidor (falta a chave do Supabase).</div>`;
     return;
   }
-  const owner = step === 'dono';
-  main().innerHTML = `
-    <h2>${owner ? 'Configurar como dono' : 'Configurar como funcionário'}</h2>
-    <form id="f" autocomplete="off">
-      <label for="nm">Seu nome</label>
-      <input id="nm" type="text" required maxlength="60" placeholder="Ex.: Ana">
-      ${owner ? `
-        <label for="pin">Senha do dono (4 a 8 números)</label>
-        <input id="pin" type="password" inputmode="numeric" pattern="[0-9]{4,8}" required>
-        <p class="small muted">A senha impede que o funcionário troque este celular para o modo dono.</p>
-        <label for="sd">Primeiro dia de conferência</label>
-        <input id="sd" type="date" required value="${ymd(now())}">
-        <p class="small muted">Depois disso a conferência é dia sim, dia não.</p>
-        <label for="dl">Horário limite para a conferência</label>
-        <input id="dl" type="time" required value="18:00">
-        <p class="small muted">Passado esse horário sem conferência, ela aparece como atrasada.</p>` : `
-        <p class="small muted">Enquanto a sincronização não estiver ligada, a conferência começa hoje e é dia sim, dia não.</p>`}
-      <p><button class="block" type="submit">Começar</button></p>
-      <p><button class="block secondary" type="button" id="back">Voltar</button></p>
-    </form>`;
-  $('#back').onclick = () => viewSetup();
+  const tabs = `<div class="toggle">
+      <button class="secondary ${mode === 'entrar' ? 'on' : ''}" data-m="entrar">Entrar</button>
+      <button class="secondary ${mode === 'criar' ? 'on' : ''}" data-m="criar">Criar conta</button>
+    </div>`;
+  if (mode === 'entrar') {
+    main().innerHTML = `
+      <h2>Bem-vindo!</h2>
+      ${tabs}
+      ${info ? `<div class="banner green">${info}</div>` : ''}
+      <form id="f" autocomplete="on">
+        <label for="em">E-mail</label>
+        <input id="em" type="email" autocomplete="username" required>
+        <label for="pw">Senha</label>
+        <input id="pw" type="password" autocomplete="current-password" required>
+        <div id="err" class="banner red hidden" style="margin-top:12px"></div>
+        <p><button class="block" type="submit" id="go">Entrar</button></p>
+      </form>`;
+  } else if (mode === 'criar') {
+    main().innerHTML = `
+      <h2>Criar conta</h2>
+      ${tabs}
+      <form id="f" autocomplete="on">
+        <label for="nm">Seu nome</label>
+        <input id="nm" type="text" maxlength="60" required placeholder="Ex.: Ana">
+        <label for="em">E-mail</label>
+        <input id="em" type="email" autocomplete="username" required>
+        <label for="pw">Senha (mínimo 6 caracteres)</label>
+        <input id="pw" type="password" autocomplete="new-password" minlength="6" required>
+        <label for="cd">Código da clínica</label>
+        <input id="cd" type="text" maxlength="12" autocapitalize="characters" placeholder="Peça ao dono">
+        <p class="small muted">Funcionário: use o código que aparece nos Ajustes do celular do dono.<br>
+        Dono: deixe em branco ao criar a primeira conta da clínica.</p>
+        <div id="err" class="banner red hidden" style="margin-top:12px"></div>
+        <p><button class="block" type="submit" id="go">Criar conta</button></p>
+      </form>`;
+  } else { // logado, mas ainda não faz parte da clínica
+    main().innerHTML = `
+      <h2>Entrar na clínica</h2>
+      <form id="f">
+        <label for="nm">Seu nome</label>
+        <input id="nm" type="text" maxlength="60" required>
+        <label for="cd">Código da clínica</label>
+        <input id="cd" type="text" maxlength="12" autocapitalize="characters" placeholder="Peça ao dono">
+        <div id="err" class="banner red ${info ? '' : 'hidden'}" style="margin-top:12px">${esc(info)}</div>
+        <p><button class="block" type="submit" id="go">Continuar</button></p>
+        <p><button class="block secondary" type="button" id="out">Sair desta conta</button></p>
+      </form>`;
+    $('#out').onclick = async () => { await cloud.signOut(); viewSetup(); };
+  }
+  $$('.toggle button').forEach(b => { b.onclick = () => viewSetup(b.dataset.m); });
+  const showErr = m => { const el = $('#err'); el.textContent = m; el.classList.toggle('hidden', !m); };
   $('#f').onsubmit = async e => {
     e.preventDefault();
-    const name = $('#nm').value.trim();
-    if (!name) return;
-    if (owner) {
-      await db.put('settings', await hashPin($('#pin').value), 'pinHash');
-      await db.put('settings', { startDate: $('#sd').value, deadline: $('#dl').value }, 'schedule');
-    } else if (!(await db.get('settings', 'schedule'))) {
-      await db.put('settings', { startDate: ymd(now()), deadline: '18:00' }, 'schedule');
-    }
-    await db.put('settings', { role: step, name }, 'profile');
-    go('#estoque');
+    showErr('');
+    const btn = $('#go');
+    btn.disabled = true;
+    let created = false;
+    try {
+      if (mode === 'entrar') {
+        await cloud.signIn($('#em').value.trim(), $('#pw').value);
+        const m = await cloud.myMembership();
+        if (!m) return viewSetup('entrar-clinica');
+        return await finishLogin(m);
+      }
+      const name = $('#nm').value.trim();
+      if (!name) throw new Error('Informe seu nome.');
+      if (mode === 'criar') {
+        const r = await cloud.signUp($('#em').value.trim(), $('#pw').value, name);
+        if (r.needsConfirm) return viewSetup('entrar', 'Conta criada. Abra o e-mail de confirmação que enviamos e depois entre aqui.');
+        created = true;
+      }
+      const m = await cloud.join(name, $('#cd')?.value.trim());
+      await finishLogin(m);
+    } catch (err) {
+      // conta criada, mas o código da clínica estava errado: pede só o código de novo
+      if (created) return viewSetup('entrar-clinica', cloud.errorText(err));
+      showErr(cloud.errorText(err));
+    } finally { if (document.body.contains(btn)) btn.disabled = false; }
   };
 }
 
@@ -285,7 +331,9 @@ async function viewList() {
     p.quantity += delta;
     p.updatedAt = new Date().toISOString();
     p.updatedBy = S.profile.name;
+    p._dirty = true;
     await db.put('products', p);
+    cloud.syncSoon();
     render();
   };
   await fillThumbs(main());
@@ -321,8 +369,10 @@ async function viewProduct(id) {
   }
   $('#del').onclick = async () => {
     if (!confirm(`Excluir "${p.name}"? Isso não pode ser desfeito.`)) return;
-    await db.del('products', p.id);
+    const cur = await db.get('products', p.id);
+    await db.put('products', { ...cur, deleted: true, updatedAt: new Date().toISOString(), updatedBy: S.profile.name, _dirty: true });
     await db.del('photos', p.id);
+    cloud.syncSoon();
     toast('Produto excluído');
     go('#estoque');
   };
@@ -393,11 +443,14 @@ async function viewForm(id) {
     const ts = new Date().toISOString();
     const rec = p ? { ...p } : { id: uuid(), createdAt: ts, createdBy: S.profile.name };
     Object.assign(rec, { name, quantity: Number(qt), min: Number(mn), updatedAt: ts, updatedBy: S.profile.name });
+    rec._dirty = true;
     if (newPhoto) {
+      rec._photoDirty = true;
       rec.photoKey = uuid();
       await db.put('photos', { id: rec.id, original: newPhoto.original, lineart: newPhoto.lineart, key: rec.photoKey });
     }
     await db.put('products', rec);
+    cloud.syncSoon();
     toast(p ? 'Produto atualizado' : 'Produto cadastrado');
     go('#produto/' + rec.id);
   };
@@ -480,10 +533,11 @@ async function viewCount(forceStart) {
     for (const p of fresh) {
       if (!(p.id in values)) continue; // produto criado durante a contagem
       items.push({ productId: p.id, name: p.name, before: p.quantity, counted: values[p.id] });
-      updated.push({ ...p, quantity: values[p.id], updatedAt: at, updatedBy: S.profile.name });
+      updated.push({ ...p, quantity: values[p.id], updatedAt: at, updatedBy: S.profile.name, _dirty: true });
     }
-    const count = { id: uuid(), date: ymd(now()), at: now().toISOString(), by: S.profile.name, role: S.profile.role, items };
+    const count = { id: uuid(), date: ymd(now()), at: now().toISOString(), by: S.profile.name, role: S.profile.role, items, _dirty: true };
     await db.saveCount(updated, count);
+    cloud.syncSoon();
     try { localStorage.removeItem(draftKey()); } catch { /* ignore */ }
     toast('Conferência concluída. App liberado.');
     go('#estoque');
@@ -525,71 +579,115 @@ async function viewHistory() {
 
 // ---------- tela: ajustes ----------
 async function viewSettings() {
+  const pending = await cloud.countPending();
   main().innerHTML = `
     <h2>Ajustes</h2>
     <div class="card">
-      <form id="fn"><label for="nm">Seu nome</label>
-      <div class="row"><input id="nm" type="text" maxlength="60" value="${esc(S.profile.name)}"><button style="flex:none">Salvar</button></div></form>
-      <p class="small muted">Perfil deste celular: <b>${isOwner() ? 'Dono' : 'Funcionário'}</b></p>
+      <div><b>${esc(S.profile.name)}</b> <span class="muted">(${isOwner() ? 'dono' : 'funcionário'})</span></div>
+      <div class="small muted">${esc(S.profile.email || '')}</div>
+      <p class="small" id="sync-info"></p>
+      <button class="block secondary" id="sync-now">Sincronizar agora</button>
     </div>
     ${isOwner() ? `
+    <div class="card">
+      <h3 style="margin-top:0">Código da clínica</h3>
+      <p class="small muted">O funcionário digita este código ao criar a conta no celular dele.</p>
+      <div style="font-size:30px;font-weight:700;letter-spacing:4px;text-align:center" id="code">${esc(S.schedule?.code || '— (sincronize)')}</div>
+      <p><button class="block secondary" id="newcode">Gerar código novo</button></p>
+    </div>
     <div class="card">
       <form id="fs">
         <h3 style="margin-top:0">Conferência</h3>
         <label for="sd">Primeiro dia de conferência</label>
-        <input id="sd" type="date" value="${esc(S.schedule.startDate)}">
+        <input id="sd" type="date" value="${esc(S.schedule?.startDate || ymd(now()))}">
+        <p class="small muted">Depois disso a conferência é dia sim, dia não.</p>
         <label for="dl">Horário limite</label>
-        <input id="dl" type="time" value="${esc(S.schedule.deadline)}">
+        <input id="dl" type="time" value="${esc(S.schedule?.deadline || '18:00')}">
+        <p class="small muted">Passado esse horário sem conferência, ela aparece como atrasada.</p>
         <p><button class="block">Salvar conferência</button></p>
       </form>
     </div>
     <div class="card">
-      <form id="fp"><label for="pin">Nova senha do dono</label>
-      <div class="row"><input id="pin" type="password" inputmode="numeric" pattern="[0-9]{4,8}"><button style="flex:none">Trocar</button></div></form>
+      <h3 style="margin-top:0">Pessoas com acesso</h3>
+      <div id="members" class="small muted">Carregando…</div>
     </div>` : ''}
     <div class="card">
-      <button class="block secondary" id="switch">${isOwner() ? 'Usar este celular como funcionário' : 'Entrar como dono neste celular'}</button>
+      <button class="block secondary" id="logout">Sair desta conta</button>
     </div>
-    <p class="small muted">Versão ${APP_VERSION}. Os dados ficam guardados só neste celular até a sincronização ser ligada.</p>`;
-  $('#fn').onsubmit = async e => {
-    e.preventDefault();
-    const name = $('#nm').value.trim();
-    if (!name) return;
-    await db.put('settings', { ...S.profile, name }, 'profile');
-    toast('Nome salvo'); render();
+    <p class="small muted">Versão ${APP_VERSION}.</p>`;
+  const info = () => {
+    const st = cloud.state;
+    const el = $('#sync-info');
+    if (!el) return;
+    el.textContent = syncText(st) + (st.lastOk ? ` Última sincronização: ${fmtDateTime(st.lastOk)}.` : '');
   };
-  if (isOwner()) {
-    $('#fs').onsubmit = async e => {
-      e.preventDefault();
-      if (!$('#sd').value || !$('#dl').value) return;
-      await db.put('settings', { startDate: $('#sd').value, deadline: $('#dl').value }, 'schedule');
-      toast('Conferência salva'); render();
-    };
-    $('#fp').onsubmit = async e => {
-      e.preventDefault();
-      if (!/^\d{4,8}$/.test($('#pin').value)) return toast('A senha precisa ter de 4 a 8 números');
-      await db.put('settings', await hashPin($('#pin').value), 'pinHash');
-      toast('Senha trocada'); render();
-    };
-  }
-  $('#switch').onclick = async () => {
-    if (isOwner()) {
-      if (!confirm('Trocar este celular para o modo funcionário?')) return;
-      await db.put('settings', { ...S.profile, role: 'funcionario' }, 'profile');
-      return go('#estoque');
-    }
-    if (!S.pinHash) {
-      const pin = prompt('Crie uma senha de dono para este celular (4 a 8 números):');
-      if (!pin || !/^\d{4,8}$/.test(pin)) return toast('Senha inválida');
-      await db.put('settings', await hashPin(pin), 'pinHash');
-    } else {
-      const pin = prompt('Senha do dono:');
-      if (pin === null) return;
-      if ((await hashPin(pin)) !== S.pinHash) return toast('Senha incorreta');
-    }
-    await db.put('settings', { ...S.profile, role: 'dono' }, 'profile');
+  info();
+  $('#sync-now').onclick = async () => { await cloud.requestSync(); info(); toast(syncText(cloud.state)); };
+  $('#logout').onclick = async () => {
+    const n = await cloud.countPending();
+    if (n && !confirm(`Há ${n} alteração(ões) ainda não enviada(s). Se sair agora, elas serão perdidas. Sair mesmo assim?`)) return;
+    if (!n && !confirm('Sair desta conta neste celular?')) return;
+    await cloud.signOut();
+    await db.clearData();
     go('#estoque');
   };
+  if (!isOwner()) return;
+  $('#newcode').onclick = async () => {
+    if (!confirm('Gerar um código novo? O código atual deixa de funcionar para novos cadastros.')) return;
+    try { $('#code').textContent = await cloud.newCode(); toast('Código novo gerado'); }
+    catch (e) { toast(cloud.errorText(e)); }
+  };
+  $('#fs').onsubmit = async e => {
+    e.preventDefault();
+    if (!$('#sd').value || !$('#dl').value) return;
+    await db.put('settings', { ...S.schedule, startDate: $('#sd').value, deadline: $('#dl').value }, 'schedule');
+    await db.put('settings', true, 'scheduleDirty');
+    cloud.syncSoon();
+    toast('Conferência salva');
+    render();
+  };
+  try {
+    const list = await cloud.members();
+    $('#members').innerHTML = list.map(m => `
+      <div class="row" style="padding:6px 0;border-bottom:1px solid var(--line)">
+        <div><b style="color:var(--text)">${esc(m.nome)}</b> <span>(${m.papel === 'dono' ? 'dono' : 'funcionário'})</span></div>
+        ${m.papel === 'dono' ? '' : `<button class="secondary" style="flex:none;min-height:36px;padding:6px 10px" data-rm="${m.user_id}" data-nome="${esc(m.nome)}">Tirar acesso</button>`}
+      </div>`).join('');
+    $$('#members [data-rm]').forEach(b => {
+      b.onclick = async () => {
+        if (!confirm(`Tirar o acesso de ${b.dataset.nome}? A pessoa não verá mais o estoque.`)) return;
+        try { await cloud.removeMember(b.dataset.rm); toast('Acesso retirado'); render(); }
+        catch (e) { toast(cloud.errorText(e)); }
+      };
+    });
+  } catch (e) {
+    $('#members').textContent = 'Não foi possível carregar (' + cloud.errorText(e) + ').';
+  }
+}
+
+function syncText(st) {
+  if (st.status === 'offline') return st.pending ? `Sem internet. ${st.pending} alteração(ões) esperando para enviar.` : 'Sem internet.';
+  if (st.status === 'syncing') return 'Sincronizando…';
+  if (st.status === 'error') return `Erro ao sincronizar: ${st.error}`;
+  if (st.status === 'logged-out') return 'Sessão expirada: toque em "Sair desta conta" e entre de novo.';
+  if (st.pending) return `${st.pending} alteração(ões) esperando para enviar.`;
+  if (st.status === 'ok') return 'Tudo sincronizado.';
+  return '';
+}
+
+function renderSyncBadge() {
+  const el = $('#sync');
+  if (!el) return;
+  const st = cloud.state;
+  let t = '';
+  if (!S.profile) t = '';
+  else if (st.status === 'offline') t = st.pending ? `📴 offline · ${st.pending} pendente(s)` : '📴 offline';
+  else if (st.status === 'syncing') t = '⏳ sincronizando';
+  else if (st.status === 'error') t = '⚠️ erro de sincronização';
+  else if (st.status === 'logged-out') t = '⚠️ entre de novo (Ajustes)';
+  else if (st.pending) t = `⏳ ${st.pending} pendente(s)`;
+  else if (st.status === 'ok') t = '☁️ sincronizado';
+  el.textContent = t;
 }
 
 // ---------- início ----------
@@ -603,6 +701,29 @@ function renderChromeOnly() {
   if (locked() && r.name !== 'conferencia') render();
 }
 
+// quando chegam dados de outro celular, redesenha (sem atrapalhar quem está digitando)
+cloud.onChange(async (st, changed) => {
+  if (st.status === 'removed' && S.profile) {
+    await cloud.signOut();
+    await db.clearData();
+    S.profile = null;
+    renderChrome(route());
+    return viewSetup('entrar', 'Seu acesso a esta clínica foi retirado pelo dono.');
+  }
+  renderSyncBadge();
+  const info = $('#sync-info');
+  if (info) info.textContent = syncText(st);
+  if (!changed || !S.profile) return;
+  const r = route();
+  if (['novo', 'editar'].includes(r.name)) return;
+  if (r.name === 'conferencia' && $('#clist')) {
+    const wasLocked = locked();
+    await load();
+    if (wasLocked === locked()) return;
+  }
+  render();
+});
+
 if ('serviceWorker' in navigator && !window.__noSW) {
   navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW', err));
 }
@@ -611,5 +732,8 @@ if ('serviceWorker' in navigator && !window.__noSW) {
 if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
 
 // usado pelos testes automáticos para esperar a tela terminar de desenhar
-window.__app = { render, S, idle: () => rendering };
-render();
+window.__app = { render, S, idle: () => rendering, cloud };
+(async () => {
+  if (await db.get('settings', 'profile')) cloud.startAuto();
+  render();
+})();

@@ -45,6 +45,11 @@ export const db = {
     const s = t.objectStore(store);
     values.forEach(v => s.put(v));
   }),
+  clearStore: (store) => run(store, 'readwrite', t => t.objectStore(store).clear()),
+  // apaga os dados do estoque deste celular (ao sair da conta); a nuvem continua com tudo
+  clearData: () => run(['products', 'photos', 'counts', 'settings'], 'readwrite', t => {
+    ['products', 'photos', 'counts', 'settings'].forEach(n => t.objectStore(n).clear());
+  }),
   // conferência: atualiza produtos e grava o registro na mesma transação
   saveCount: (products, count) => run(['products', 'counts'], 'readwrite', t => {
     const ps = t.objectStore('products');

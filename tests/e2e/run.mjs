@@ -1,4 +1,5 @@
-// Teste ponta a ponta no Chromium (emulando celular Android) com relógio controlado.
+// Teste ponta a ponta no Chromium (emulando dois celulares Android: dono e funcionário)
+// com relógio controlado e um Supabase FALSO (tests/e2e/fake-supabase.mjs).
 // Uso: node tests/e2e/run.mjs   (gera capturas em tests/e2e/shots/)
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
@@ -6,6 +7,7 @@ import { mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import assert from 'node:assert/strict';
+import { FakeSupabase, FAKE_URL } from './fake-supabase.mjs';
 // usa o Playwright instalado globalmente ou o do projeto
 const { chromium, devices } = createRequire(import.meta.url)('playwright');
 
@@ -27,11 +29,17 @@ const step = async (name, fn) => {
 
 const browser = await chromium.launch();
 const errors = [];
+const fake = new FakeSupabase();
 async function device(label) {
   const ctx = await browser.newContext({ ...devices['Pixel 7'], locale: 'pt-BR', timezoneId: 'America/Sao_Paulo' });
+  await fake.attach(ctx);
+  await ctx.addInitScript(url => { window.__KF_CONFIG = { url, key: 'chave-anon-de-teste', realtime: false, pollSeconds: 3 }; }, FAKE_URL);
   const page = await ctx.newPage();
   page.on('pageerror', e => errors.push(`[${label}] ${e.message}`));
-  page.on('console', m => { if (m.type() === 'error') errors.push(`[${label}] console: ${m.text()}`); });
+  page.on('console', m => {
+    // falhas de rede esperadas quando o teste desliga a internet
+    if (m.type() === 'error' && !/ERR_INTERNET_DISCONNECTED|Failed to load resource|ERR_CONNECTION_REFUSED/.test(m.text())) errors.push(`[${label}] console: ${m.text()}`);
+  });
   page.on('dialog', d => d.accept(page.__dialogAnswer ?? undefined));
   return { ctx, page };
 }
@@ -47,6 +55,18 @@ async function waitHash(page, prefix) {
   await page.evaluate(() => window.__app.idle());
 }
 const shot = (page, name) => page.screenshot({ path: path.join(SHOTS, name + '.png') });
+// espera a sincronização terminar
+const synced = page => page.evaluate(async () => { await window.__app.cloud.requestSync(); await window.__app.idle(); return window.__app.cloud.state; });
+async function signup(page, { name, email, code }) {
+  await page.goto(URL);
+  await page.waitForFunction(() => !!window.__app);
+  await page.click('.toggle button[data-m=criar]');
+  await page.fill('#nm', name);
+  await page.fill('#em', email);
+  await page.fill('#pw', 'senha-teste-123');
+  if (code !== undefined) await page.fill('#cd', code);
+  await page.click('#go');
+}
 const setTime = async (page, iso) => { await page.clock.setSystemTime(new Date(iso)); await page.reload(); await page.waitForFunction(() => !!window.__app); await page.evaluate(() => window.__app.idle()); };
 
 async function addProduct(page, { name, qty, min, file }) {
@@ -72,19 +92,58 @@ async function addProduct(page, { name, qty, min, file }) {
 }
 
 try {
+  // ================= Dono cria a conta e a clínica =================
+  const own = await device('dono');
+  const op = own.page;
+  await op.clock.install({ time: new Date('2026-11-26T08:30:00-03:00') }); // quinta, dia de conferência
+  let code;
+  await step('dono cria a primeira conta e vira dono', async () => {
+    await op.goto(URL);
+    await op.getByText('Bem-vindo!').waitFor();
+    await shot(op, '01-entrar');
+    await signup(op, { name: 'Carlos', email: 'dono@teste.kf' });
+    await waitHash(op, '#estoque');
+    await op.getByText('Nenhum produto cadastrado ainda.').waitFor();
+    assert.match(await op.textContent('#who'), /Carlos · Dono/);
+  });
+  await step('dono define início e prazo da conferência e vê o código da clínica', async () => {
+    await nav(op, '#ajustes');
+    await op.fill('#sd', '2026-11-26');
+    await op.fill('#dl', '18:00');
+    await op.click('#fs button');
+    await synced(op);
+    assert.equal(fake.tables.config[0].inicio, '2026-11-26');
+    await nav(op, '#ajustes');
+    code = (await op.textContent('#code')).trim();
+    assert.equal(code, fake.tables.config[0].codigo_convite);
+    await op.waitForSelector('#members .row');
+    await shot(op, '08-ajustes-dono');
+  });
+
   // ================= Celular do funcionário =================
   const { ctx, page } = await device('funcionario');
-  await page.clock.install({ time: new Date('2026-11-26T09:00:00-03:00') }); // quinta, dia de conferência
+  await page.clock.install({ time: new Date('2026-11-26T09:00:00-03:00') });
 
-  await step('primeiro acesso: escolhe perfil funcionário', async () => {
-    await page.goto(URL);
-    await page.getByText('Quem vai usar este celular?').waitFor();
-    await shot(page, '01-primeiro-acesso');
-    await page.click('#be-staff');
+  await step('funcionário com código errado não entra; com o código certo entra', async () => {
+    await signup(page, { name: 'Bruna', email: 'bruna@teste.kf', code: 'ERRADO' });
+    await page.getByText('Código da clínica inválido').waitFor();
+    assert.equal(await page.textContent('h2'), 'Entrar na clínica');
     await page.fill('#nm', 'Bruna');
-    await page.click('button[type=submit]');
-    await page.getByText('Nenhum produto cadastrado ainda.').waitFor();
-    assert.match(await page.textContent('#who'), /Bruna/);
+    await page.fill('#cd', code.toLowerCase());
+    await page.click('#go');
+    await waitHash(page, '#estoque');
+    assert.match(await page.textContent('#who'), /Bruna · Funcionário/);
+    assert.equal(fake.tables.membros.find(m => m.nome === 'Bruna').papel, 'funcionario');
+  });
+
+  await step('senha errada é recusada no login', async () => {
+    const tmp = await device('tmp');
+    await tmp.page.goto(URL);
+    await tmp.page.fill('#em', 'bruna@teste.kf');
+    await tmp.page.fill('#pw', 'errada');
+    await tmp.page.click('#go');
+    await tmp.page.getByText('E-mail ou senha incorretos.').waitFor();
+    await tmp.ctx.close();
   });
 
   await step('validação do cadastro', async () => {
@@ -254,27 +313,92 @@ try {
     await waitHash(page, '#estoque');
   });
 
-  await step('funcionário não entra como dono sem senha certa', async () => {
-    await nav(page, '#ajustes');
-    page.__dialogAnswer = '1234'; // este celular não tem senha: cria
-    await page.click('#switch');
-    await page.waitForFunction(() => document.querySelector('#who').textContent.includes('Dono'));
-    // volta a funcionário e tenta senha errada
-    await nav(page, '#ajustes');
-    page.__dialogAnswer = undefined;
-    await page.click('#switch');
-    await page.waitForFunction(() => document.querySelector('#who').textContent.includes('Funcionário'));
-    await nav(page, '#ajustes');
-    page.__dialogAnswer = '9999';
-    await page.click('#switch');
-    await page.getByText('Senha incorreta').waitFor();
-    assert.match(await page.textContent('#who'), /Funcionário/);
-    page.__dialogAnswer = '1234';
-    await page.click('#switch');
-    await page.waitForFunction(() => document.querySelector('#who').textContent.includes('Dono'));
+  await step('produtos, fotos e quantidades do funcionário chegam no celular do dono', async () => {
+    await synced(page);
+    assert.equal(fake.tables.produtos.length, 3);
+    assert.equal(fake.files.size, 6); // 3 originais + 3 desenhos
+    await setTime(op, '2026-12-01T09:00:00-03:00');
+    await synced(op);
+    await nav(op, '#estoque');
+    const q = await op.$$eval('li.prod', els => Object.fromEntries(els.map(e => [e.querySelector('.name').textContent, e.querySelector('.n').textContent])));
+    assert.deepEqual(q, { 'Álcool 70% 1L': '2', 'Gaze estéril': '18', 'Luva de procedimento M': '9' });
+    assert.deepEqual(await op.$$eval('li.prod.low .name', els => els.map(e => e.textContent)), ['Álcool 70% 1L']);
+    await op.waitForFunction(() => [...document.querySelectorAll('img.thumb')].length === 3 && [...document.querySelectorAll('img.thumb')].every(i => i.naturalWidth === 800));
+    await shot(op, '09-dono-recebeu-produtos');
   });
 
-  await step('dono vê quem conferiu e quando, e dias perdidos', async () => {
+  await step('dono altera um produto e o funcionário recebe', async () => {
+    const li = op.locator('li.prod', { hasText: 'Álcool' });
+    await li.locator('[data-act=inc]').click();
+    await li.locator('[data-act=inc]').click();
+    await li.locator('[data-act=inc]').click();
+    await op.waitForFunction(() => !document.querySelector('li.prod.low'));
+    await synced(op);
+    await setTime(page, '2026-12-01T09:05:00-03:00');
+    await synced(page);
+    await nav(page, '#estoque');
+    assert.equal(await page.locator('li.prod', { hasText: 'Álcool' }).locator('.n').textContent(), '5');
+    assert.equal(await page.$('li.prod.low'), null);
+  });
+
+  await step('sem internet: alteração fica guardada e é enviada quando a internet volta', async () => {
+    await ctx.setOffline(true);
+    await page.evaluate(() => window.dispatchEvent(new Event('offline')));
+    const li = page.locator('li.prod', { hasText: 'Gaze' });
+    await li.locator('[data-act=dec]').click();
+    await page.waitForFunction(() => /offline · 1 pendente/.test(document.querySelector('#sync')?.textContent || ''));
+    await shot(page, '10-offline-pendente');
+    assert.equal(fake.tables.produtos.find(p => p.nome === 'Gaze estéril').quantidade, 18);
+    await ctx.setOffline(false);
+    await page.evaluate(() => window.dispatchEvent(new Event('online')));
+    await page.waitForFunction(() => /sincronizado/.test(document.querySelector('#sync')?.textContent || ''));
+    assert.equal(fake.tables.produtos.find(p => p.nome === 'Gaze estéril').quantidade, 17);
+  });
+
+  await step('conflito: dois celulares mudam o mesmo produto, vale a alteração mais recente', async () => {
+    await ctx.setOffline(true);
+    await page.evaluate(() => window.dispatchEvent(new Event('offline')));
+    await page.locator('li.prod', { hasText: 'Luva' }).locator('[data-act=inc]').click(); // 09:05 → 10
+    await setTime(op, '2026-12-01T09:10:00-03:00');
+    await nav(op, '#estoque');
+    await op.locator('li.prod', { hasText: 'Luva' }).locator('[data-act=dec]').click();   // 09:10 → 8
+    await synced(op);
+    await ctx.setOffline(false);
+    await page.evaluate(() => window.dispatchEvent(new Event('online')));
+    await synced(page);
+    await nav(page, '#estoque');
+    assert.equal(fake.tables.produtos.find(p => p.nome === 'Luva de procedimento M').quantidade, 8);
+    assert.equal(await page.locator('li.prod', { hasText: 'Luva' }).locator('.n').textContent(), '8');
+  });
+
+  await step('produto excluído some nos dois celulares', async () => {
+    const id = await op.locator('li.prod', { hasText: 'Gaze' }).getAttribute('data-id');
+    await nav(op, '#produto/' + id);
+    await op.click('#del');
+    await waitHash(op, '#estoque');
+    await synced(op);
+    await synced(page);
+    await nav(page, '#estoque');
+    assert.equal(await page.locator('li.prod', { hasText: 'Gaze' }).count(), 0);
+    assert.equal(fake.tables.produtos.find(p => p.id === id).excluido, true);
+  });
+
+  await step('dono troca o prazo e o funcionário passa a seguir o novo prazo', async () => {
+    await nav(op, '#ajustes');
+    await op.fill('#dl', '07:00');
+    await op.click('#fs button');
+    await synced(op);
+    await setTime(page, '2026-12-02T08:00:00-03:00'); // dia de conferência, já passou das 07:00
+    await synced(page);
+    await page.evaluate(() => window.__app.render());
+    await waitHash(page, '#conferencia');
+    await page.getByText(/Conferência atrasada \(dia 02\/12\/2026\)/).waitFor();
+  });
+
+  await step('dono vê quem conferiu e quando (vindo do celular do funcionário)', async () => {
+    await setTime(op, '2026-12-01T20:00:00-03:00');
+    await synced(op);
+    const page = op;
     await nav(page, '#historico');
     await page.waitForSelector('table.hist');
     const rows = await page.$$eval('table.hist:first-of-type tbody tr', trs => trs.map(tr => [...tr.children].map(td => td.innerText.replace(/\s+/g, ' ').trim())));
@@ -288,6 +412,32 @@ try {
     await shot(page, '06-historico-dono');
   });
 
+  await step('dono vê aviso de conferência atrasada e nunca é bloqueado', async () => {
+    await setTime(op, '2026-12-02T09:00:00-03:00');
+    await synced(op);
+    await nav(op, '#estoque');
+    assert.ok(op.url().includes('#estoque'));
+    await op.getByText('Conferência ATRASADA (dia 02/12/2026). O funcionário ainda não contou o estoque.').waitFor();
+    await shot(op, '07-dono-aviso-atrasada');
+  });
+
+  await step('dono tira o acesso do funcionário', async () => {
+    await nav(op, '#ajustes');
+    await op.waitForSelector('#members [data-rm]');
+    await op.click('#members [data-rm]');
+    await op.waitForFunction(() => !document.querySelector('#members [data-rm]'));
+    assert.equal(fake.tables.membros.length, 1);
+  });
+
+  await step('quem perdeu o acesso é desconectado e os dados saem do celular', async () => {
+    await page.evaluate(() => window.__app.cloud.requestSync());
+    await page.getByText('Seu acesso a esta clínica foi retirado pelo dono.').waitFor();
+    const left = await page.evaluate(() => new Promise(r => {
+      const q = indexedDB.open('estoque-kf'); q.onsuccess = () => { const g = q.result.transaction('products').objectStore('products').count(); g.onsuccess = () => r(g.result); };
+    }));
+    assert.equal(left, 0);
+  });
+
   await step('funciona sem internet depois de aberto uma vez', async () => {
     await page.evaluate(() => navigator.serviceWorker.ready);
     await nav(page, '#estoque');
@@ -295,7 +445,8 @@ try {
     await page.waitForFunction(() => !!navigator.serviceWorker.controller);
     await ctx.setOffline(true);
     await page.reload();
-    await page.waitForSelector('#plist');
+    await page.waitForSelector('#main h2');
+    assert.match(await page.textContent('header h1'), /Estoque Clínica KF/);
     await ctx.setOffline(false);
   });
 
@@ -308,27 +459,6 @@ try {
   });
   await ctx.close();
 
-  // ================= Celular do dono =================
-  const own = await device('dono');
-  const op = own.page;
-  await op.clock.install({ time: new Date('2026-11-26T09:00:00-03:00') });
-  await step('dono configura senha, início e horário; nunca é bloqueado', async () => {
-    await op.goto(URL);
-    await op.click('#be-owner');
-    await op.fill('#nm', 'Carlos');
-    await op.fill('#pin', '4321');
-    await op.fill('#sd', '2026-11-26');
-    await op.fill('#dl', '12:00');
-    await op.click('button[type=submit]');
-    await op.waitForSelector('#tabs:not(.hidden)');
-    await addProduct(op, { name: 'Seringa 5ml', qty: 50, min: 20, file: 'produto.jpg' });
-    await setTime(op, '2026-11-28T13:00:00-03:00');
-    await nav(op, '#estoque');
-    await op.waitForSelector('#plist');
-    assert.ok(op.url().includes('#estoque'));
-    await op.getByText('Conferência ATRASADA (dia 28/11/2026). O funcionário ainda não contou o estoque.').waitFor();
-    await shot(op, '07-dono-aviso-atrasada');
-  });
   await own.ctx.close();
 
   assert.deepEqual(errors, [], 'erros no console');
