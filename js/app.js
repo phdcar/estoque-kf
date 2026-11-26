@@ -7,10 +7,10 @@ import { I } from './icons.js';
 import * as cloud from './cloud.js';
 import { startAmbient, skyState, PERIOD_NAME, tapURI } from './ambient.js';
 import { consumption, forecastDays, suggestLevels, rateText, forecastText, withQuantity, addLot, lotsTotal, sortedLots,
-  expiriesByMonth, stockValue, monthSummary, monthKey, brl, orderText, whatsappUrl } from './insights.js';
+  expiriesByMonth, stockValue, monthSummary, monthKey, brl, orderText, whatsappUrl, priceHistory, priceTrend, priceBySupplier, pctText } from './insights.js';
 import { scanBarcode } from './scanner.js';
 
-export const APP_VERSION = '0.7.1';
+export const APP_VERSION = '0.7.2';
 export { isLow };
 
 // ---------- utilidades ----------
@@ -580,7 +580,7 @@ async function viewList(filter = 'todos') {
     ${low.length ? `<div class="banner red" id="low-banner">${I.alert}<span>${low.length} ${low.length === 1 ? 'produto abaixo' : 'produtos abaixo'} do mínimo: ${low.map(p => esc(p.name)).join(', ')}</span></div>` : ''}
     <div class="eyebrow">Estoque</div>
     <h2>Produtos <span class="muted" style="font-family:var(--sans);font-size:16px">(${S.products.length})</span></h2>
-    ${S.products.length ? `<div class="search-row">${S.products.length > 5 ? `<div class="search">${I.search}<input type="search" id="q" placeholder="Buscar por nome ou fornecedor" value="${esc(searchTerm)}" aria-label="Buscar"></div>` : '<span></span>'}
+    ${S.products.length ? `<div class="search-row">${S.products.length > 5 ? `<div class="search">${I.search}<input type="search" id="q" placeholder="Nome ou fornecedor" value="${esc(searchTerm)}" aria-label="Buscar"></div>` : '<span></span>'}
       <button type="button" class="secondary small-btn" id="l-scan">${I.scan}Ler código</button></div>` : ''}
     ${S.products.length ? `<div class="chips" id="filters">${FILTERS.map(([k, t]) =>
       `<button type="button" class="chip ${k === filter ? 'on' : ''} ${k === 'alerta' ? 'red' : ''}" data-f="${k}">${t}<span class="c">${count(k)}</span></button>`).join('')}</div>` : ''}
@@ -614,7 +614,34 @@ async function viewList(filter = 'todos') {
 }
 
 // ---------- produto: consumo, lotes, entrada e movimentos (versão 0.7) ----------
-const MOVE_NAME = { entrada: 'Entrada', saida: 'Saída', ajuste: 'Ajuste', conferencia: 'Conferência', perda: 'Perda (descarte)' };
+const MOVE_NAME = { entrada: 'Entrada', saida: 'Saída', ajuste: 'Ajuste', conferencia: 'Conferência', perda: 'Perda (descarte)', preco: 'Preço' };
+
+// ---------- histórico de preços ----------
+const dayOf = iso => fmtDay(ymd(new Date(iso)));
+function trendHtml(p) {
+  const t = priceTrend(priceHistory(S.moves, p.id), p.price);
+  if (!t) return '';
+  if (t.prev == null) return t.since ? `<small class="tr">Preço desde ${dayOf(t.since)}</small>` : '';
+  return `<small class="tr ${t.dir}">Antes ${brl(t.prev)} <em>${t.dir === 'up' ? '▲' : '▼'} ${pctText(t.pct)}</em></small>`;
+}
+function sparkline(h) {
+  const w = 300, ht = 64, pad = 8, ps = h.map(x => x.price), mn = Math.min(...ps), mx = Math.max(...ps), rng = mx - mn || 1;
+  const pts = h.map((x, i) => [pad + (w - 2 * pad) * (i / (h.length - 1)), mx === mn ? ht / 2 : ht - pad - (ht - 2 * pad) * ((x.price - mn) / rng)]);
+  const line = pts.map(q => q.map(v => v.toFixed(1)).join(',')).join(' ');
+  return `<svg class="spark" viewBox="0 0 ${w} ${ht}" preserveAspectRatio="none" aria-hidden="true"><polygon points="${pad},${ht} ${line} ${w - pad},${ht}"/><polyline points="${line}"/></svg>`;
+}
+function priceDetails(p) {
+  const h = priceHistory(S.moves, p.id);
+  if (!h.length) return `<p class="small muted ph-empty">Ainda sem histórico. A partir de agora, cada preço novo fica registrado aqui, com a data e o fornecedor.</p>`;
+  const ps = h.map(x => x.price);
+  const sup = priceBySupplier(h);
+  const rev = [...h].reverse().slice(0, 12);
+  return `${h.length > 1 ? `${sparkline(h)}<div class="spark-legend"><span>${dayOf(h[0].at)}</span><span>Menor ${brl(Math.min(...ps))} · maior ${brl(Math.max(...ps))}</span><span>hoje</span></div>` : ''}
+    <ul class="ph">${rev.map((x, i) => { const prev = rev[i + 1]; const pct = prev && prev.price ? (x.price - prev.price) / prev.price * 100 : null;
+      return `<li><span>${dayOf(x.at)}<small>${esc(x.supplier || 'Sem fornecedor')} · ${x.kind === 'entrada' ? 'compra' : 'preço atualizado'}</small></span>
+        <b>${brl(x.price)}${pct ? `<em class="${pct > 0 ? 'up' : 'down'}">${pct > 0 ? '▲' : '▼'} ${pctText(pct)}</em>` : ''}</b></li>`; }).join('')}</ul>
+    ${sup.length > 1 ? `<div class="ph-sup"><span class="lbl">Comparar fornecedores · último preço</span>${sup.map((x, i) => `<div><span>${esc(x.supplier)}${i === 0 ? ' <span class="pill green">mais barato</span>' : ''}<small>em ${dayOf(x.lastAt)}${x.min < x.last ? ` · já foi ${brl(x.min)}` : ''}</small></span><b>${brl(x.last)}</b></div>`).join('')}</div>` : ''}`;
+}
 function productExtras(p) {
   const c = S.cons.get(p.id);
   const d = forecastDays(p, c);
@@ -623,7 +650,7 @@ function productExtras(p) {
   const lots = sortedLots(p);
   const loose = Math.max(0, Number(p.quantity) - lotsTotal(p));
   const nd = p.expiry === NO_EXPIRY;
-  const moves = S.moves.filter(m => m.productId === p.id).slice(-8).reverse();
+  const moves = S.moves.filter(m => m.productId === p.id && m.type !== 'preco').slice(-8).reverse();
   return `
     <h3>Consumo e previsão</h3>
     <div class="card stats">
@@ -635,6 +662,8 @@ function productExtras(p) {
         <small>Alerta = 1 semana de uso; ideal = 1 mês. Hoje: alerta ${Number(p.min) || '—'}, ideal ${Number(p.ideal) || '—'}.</small>
         ${sugDiff ? `<button type="button" class="secondary small-btn" id="use-sug">Usar sugestão</button>` : ''}</div>` : ''}
     </div>
+    <h3>Histórico de preços</h3>
+    <div class="card price-hist">${priceDetails(p)}${isOwner() ? `<a class="small-link" href="#precos">${I.money}Atualizar preços de todos os produtos</a>` : ''}</div>
     ${nd ? '' : `
     <h3>Lotes e validade</h3>
     <div class="card">
@@ -801,7 +830,7 @@ async function viewProduct(id) {
       <div><span>Comprar</span><b class="${isLow(p) ? 'red' : 'sm muted'}">${isLow(p) ? buy(p) : buy(p) ? `${buy(p)} <small>até o ideal</small>` : 'Nada agora'}</b></div>
       <div><span>Fornecedor</span><b class="${p.supplier ? 'sm' : 'miss'}">${p.supplier ? esc(p.supplier) : 'Não informado'}</b></div>
       <div><span>Categoria</span><b class="${p.category ? 'sm' : 'miss'}">${p.category ? esc(p.category) : 'Não informada'}</b></div>
-      <div><span>Preço unitário</span><b class="sm ${p.price != null ? '' : 'muted'}">${p.price != null ? brl(p.price) : 'Não informado'}</b></div>
+      <div><span>Preço unitário</span><b class="sm ${p.price != null ? '' : 'muted'}">${p.price != null ? brl(p.price) : 'Não informado'}</b>${trendHtml(p)}</div>
       <div><span>Valor em estoque</span><b class="sm ${p.price != null ? '' : 'muted'}">${p.price != null ? brl(p.price * p.quantity) : '—'}</b></div>
       <div class="wide"><span>Validade</span><b id="f-vl" class="sm ${!p.expiry ? 'miss' : ''} ${{ vencido: 'red', 'vence-logo': 'amber' }[expiryLevel(p, now())] || ''}">${p.expiry === NO_EXPIRY ? 'ND · sem validade' : p.expiry ? `${fmtDay(p.expiry)} <small>· ${expiryText(p, now())}</small>` : 'Não informada'}</b></div>
     </div>
@@ -866,6 +895,7 @@ async function viewForm(id) {
           <div class="bc-row"><input id="bc" type="text" inputmode="numeric" maxlength="40" value="${esc(p?.barcode || pendingBarcode || '')}" placeholder="Opcional">
           <button type="button" class="secondary icon-btn" id="bc-scan" aria-label="Ler código de barras com a câmera">${I.scan}</button></div></div>
       </div>
+      ${isOwner() ? `<a class="small-link" href="#precos">${I.money}Atualizar preços de todos os produtos de uma vez</a>` : ''}
       <div class="hint">O preço mostra quanto dinheiro está no estoque e quanto se gasta por mês. O código de barras deixa a conferência mais rápida.</div>
       ${p && (p.lots || []).length ? `<label>Data de validade</label>
       <div class="lot-note">${I.calendar}<span>Controlada pelos lotes: vence primeiro em <b>${fmtDay(sortedLots(p)[0]?.expiry || p.expiry)}</b>. Veja e altere os lotes na página do produto.</span></div>` : `
@@ -944,11 +974,13 @@ async function viewForm(id) {
     const ts = new Date().toISOString();
     const rec = p ? { ...(await db.get('products', p.id)) } : { id: uuid(), createdAt: ts, createdBy: S.profile.name };
     const oldQty = p ? Number(rec.quantity) : null;
+    const oldPrice = p ? (rec.price ?? null) : null;
     Object.assign(rec, { name, category: cat, supplier: sup, min: Number(mn), ideal: idl ? Number(idl) : null, expiry: vl,
       price: prTxt ? Number(prTxt) : null, barcode: bc, updatedAt: ts, updatedBy: S.profile.name });
     const moves = [];
     if (p && Number(qt) !== oldQty) { moves.push(makeMove(rec, Number(qt), 'ajuste', { note: 'Editado no cadastro' })); Object.assign(rec, withQuantity(rec, Number(qt))); }
     else rec.quantity = Number(qt);
+    if (rec.price != null && rec.price !== oldPrice) moves.push(makeMove(rec, Number(rec.quantity), 'preco', { note: oldPrice != null ? `Antes ${brl(oldPrice)}` : 'Primeiro preço' }));
     rec._dirty = true;
     if (newPhoto) {
       rec._photoDirty = true;
@@ -1187,49 +1219,72 @@ async function viewHistory() {
 }
 
 // ---------- tela: ajustes ----------
-// ---------- tela: preencher preços de uma vez (dono) ----------
-let pricesOnlyMissing = null;
+// ---------- tela: preços (preencher de uma vez, comparar antes e agora) ----------
+let priceFilter = null;
+const PRICE_FILTERS = [['falta', 'Sem preço'], ['todos', 'Todos'], ['subiu', 'Subiram'], ['baixou', 'Baixaram']];
 async function viewPrices() {
-  const missing = S.products.filter(p => p.price == null);
-  if (pricesOnlyMissing === null) pricesOnlyMissing = missing.length > 0;
-  const shown = S.products.filter(p => !pricesOnlyMissing || p.price == null);
+  const trend = p => priceTrend(priceHistory(S.moves, p.id), p.price);
+  const matches = (p, f) => f === 'todos' || (f === 'falta' ? p.price == null : trend(p)?.dir === (f === 'subiu' ? 'up' : 'down'));
+  const counts = () => Object.fromEntries(PRICE_FILTERS.map(([k]) => [k, S.products.filter(p => matches(p, k)).length]));
+  let c = counts();
+  if (!priceFilter || (priceFilter !== 'todos' && !c[priceFilter])) priceFilter = c.falta ? 'falta' : 'todos';
+  const shown = S.products.filter(p => matches(p, priceFilter));
   const groups = [...new Set(shown.map(p => p.supplier || 'Sem fornecedor'))].sort((a, b) => a.localeCompare(b, 'pt-BR'))
     .map(g => [g, shown.filter(p => (p.supplier || 'Sem fornecedor') === g).sort(byName)]);
   const fmt = v => v == null ? '' : Number(v).toFixed(2).replace('.', ',');
+  const hasHist = p => priceHistory(S.moves, p.id).length > 0;
   main().innerHTML = `
     <a href="#historico" class="back">${I.back}Relatórios</a>
     <div class="eyebrow">Custo do estoque</div>
     <h2>Preços dos produtos</h2>
     <div class="card price-sum" id="psum"></div>
-    <div class="chips" id="pf"><button type="button" class="chip ${pricesOnlyMissing ? 'on' : ''}" data-m="1">Sem preço<span class="c" id="pf-n">${missing.length}</span></button>
-      <button type="button" class="chip ${!pricesOnlyMissing ? 'on' : ''}" data-m="0">Todos<span class="c">${S.products.length}</span></button></div>
-    <p class="small muted">Digite o preço de uma unidade e passe para o próximo. Cada preço é salvo na hora.</p>
-    ${!shown.length ? `<div class="card empty">${I.ok}<p>Todos os produtos já têm preço.</p></div>` : ''}
-    ${groups.map(([g, ps]) => `<h3>${esc(g)}</h3><div class="card price-list">${ps.map(p => `
-      <label class="pr-row" data-id="${p.id}"><span class="nm">${esc(p.name)}<small>${p.quantity} em estoque</small></span>
-        <span class="pin"><i>R$</i><input type="text" inputmode="decimal" enterkeyhint="next" autocomplete="off" placeholder="0,00" value="${fmt(p.price)}" aria-label="Preço de ${esc(p.name)}"></span>
-        <b class="st" aria-live="polite"></b></label>`).join('')}</div>`).join('')}`;
+    <div class="chips" id="pf">${PRICE_FILTERS.map(([k, t]) => `<button type="button" class="chip ${k === priceFilter ? 'on' : ''} ${k === 'subiu' ? 'red' : ''}" data-f="${k}">${t}<span class="c" data-n="${k}">${c[k]}</span></button>`).join('')}</div>
+    <p class="small muted">Digite o preço de uma unidade e toque em "Próximo". Cada preço é salvo na hora e fica no histórico, para comparar com o anterior, com outras datas e com outros fornecedores.</p>
+    ${!shown.length ? `<div class="card empty">${I.ok}<p>${priceFilter === 'falta' ? 'Todos os produtos já têm preço.' : 'Nenhum produto neste filtro.'}</p></div>` : ''}
+    ${groups.map(([g, ps]) => `<h3>${esc(g)} <span class="muted h-n">${ps.length}</span></h3><div class="card price-list">${ps.map(p => `
+      <div class="pr-row" data-id="${p.id}">
+        <label class="nm" for="pi-${p.id}">${esc(p.name)}<small>${p.quantity} em estoque</small><span class="trw">${trendHtml(p)}</span></label>
+        <span class="pin"><i>R$</i><input id="pi-${p.id}" type="text" inputmode="decimal" enterkeyhint="next" autocomplete="off" placeholder="0,00" value="${fmt(p.price)}"></span>
+        <b class="st" aria-live="polite"></b>
+        <button type="button" class="ph-tog ${hasHist(p) ? '' : 'hidden'}" aria-expanded="false">${I.trend}<span>Histórico</span></button>
+        <div class="ph-box hidden"></div>
+      </div>`).join('')}</div>`).join('')}`;
   const sum = () => {
     const sv = stockValue(S.products), n = S.products.length - sv.missing;
-    $('#psum').innerHTML = `<div><span>Com preço</span><b>${n} de ${S.products.length}</b></div><div><span>Valor em estoque</span><b>${brl(sv.value)}</b></div>`;
-    $('#pf-n').textContent = sv.missing;
+    c = counts();
+    $('#psum').innerHTML = `<div><span>Com preço</span><b>${n} de ${S.products.length}</b></div><div><span>Valor em estoque</span><b>${brl(sv.value)}</b></div>
+      ${c.subiu || c.baixou ? `<div class="wide"><span class="up">▲ ${plural(c.subiu, 'subiu', 'subiram')}</span><span class="down">▼ ${plural(c.baixou, 'baixou', 'baixaram')}</span><small>comparado com o preço anterior de cada produto</small></div>` : ''}`;
+    $$('#pf [data-n]').forEach(e => { e.textContent = c[e.dataset.n]; });
   };
   sum();
-  $$('#pf .chip').forEach(b => b.onclick = () => { pricesOnlyMissing = b.dataset.m === '1'; render(); });
+  $$('#pf .chip').forEach(b => b.onclick = () => { priceFilter = b.dataset.f; render(); });
+  $$('.ph-tog').forEach(b => b.onclick = () => {
+    const row = b.closest('.pr-row'), box = $('.ph-box', row), open = box.classList.contains('hidden');
+    if (open) box.innerHTML = priceDetails(S.products.find(x => x.id === row.dataset.id));
+    box.classList.toggle('hidden', !open); b.setAttribute('aria-expanded', String(open));
+  });
   const inputs = $$('.pr-row input');
   inputs.forEach((inp, i) => {
     const row = inp.closest('.pr-row'), st = $('.st', row), id = row.dataset.id;
-    const save = async () => {
+    let queue = Promise.resolve();
+    // Enter e a saída do campo disparam juntos: grava um de cada vez para não duplicar o histórico
+    const save = () => (queue = queue.then(doSave).catch(e => console.error(e)));
+    const doSave = async () => {
       const t = inp.value.trim();
       const price = t ? parsePrice(t) : null;
       row.classList.toggle('bad', !!t && price == null);
       if (t && price == null) { st.textContent = 'Inválido'; return; }
       const cur = await db.get('products', id);
-      if (!cur || (cur.price ?? null) === price) { st.textContent = ''; return; }
+      if (!cur || (cur.price ?? null) === price) { if (st.textContent === 'Inválido') st.textContent = ''; return; }
       const next = touch({ ...cur, price });
-      await db.put('products', next);
+      const moves = price != null ? [makeMove(next, Number(cur.quantity), 'preco', { note: cur.price != null ? `Antes ${brl(cur.price)}` : 'Primeiro preço' })] : [];
+      await db.saveMoves([next], moves);
+      S.moves.push(...moves);
       const k = S.products.findIndex(x => x.id === id); if (k >= 0) S.products[k] = next;
       inp.value = fmt(price); st.innerHTML = `${I.ok}<span>Salvo</span>`;
+      $('.trw', row).innerHTML = trendHtml(next);
+      $('.ph-tog', row).classList.toggle('hidden', !hasHist(next));
+      const box = $('.ph-box', row); if (!box.classList.contains('hidden')) box.innerHTML = priceDetails(next);
       sum(); cloud.syncSoon();
     };
     inp.addEventListener('change', save);

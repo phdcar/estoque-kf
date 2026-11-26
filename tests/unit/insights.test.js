@@ -96,3 +96,27 @@ test('texto do pedido e link do WhatsApp', () => {
   assert.equal(t, 'Olá! Pedido da Clínica KF (26/11/2026) para Dental Cremer:\n• 10 × Seringa 5 ml\n• 2 × Álcool 70%\n\nObrigado!');
   assert.match(whatsappUrl(t), /^https:\/\/wa\.me\/\?text=Ol%C3%A1!/);
 });
+
+test('histórico de preços: mudanças, tendência e fornecedores', async () => {
+  const { priceHistory, priceTrend, priceBySupplier, pctText } = await import('../../js/insights.js');
+  const mv = (type, price, supplier, at, delta = 0) => ({ productId: 'a', type, price, supplier, at, delta });
+  const moves = [
+    mv('saida', 10, 'X', '2026-10-01T10:00:00Z', -1),       // saída não conta como preço
+    mv('preco', 10, 'X', '2026-10-02T10:00:00Z'),
+    mv('entrada', 10, 'X', '2026-10-05T10:00:00Z', 5),      // mesmo preço e fornecedor: ignora
+    mv('entrada', 9, 'Y', '2026-10-20T10:00:00Z', 5),
+    mv('preco', 12, 'X', '2026-11-10T10:00:00Z'),
+    mv('preco', 5, 'X', '2026-11-11T10:00:00Z', 0), // outro produto abaixo
+  ];
+  moves[5].productId = 'b';
+  const h = priceHistory(moves, 'a');
+  assert.deepEqual(h.map(x => [x.price, x.supplier]), [[10, 'X'], [9, 'Y'], [12, 'X']]);
+  const t = priceTrend(h, 12);
+  assert.equal(t.prev, 9); assert.equal(t.dir, 'up'); assert.equal(Math.round(t.pct), 33);
+  assert.equal(priceTrend(h, 9).dir, 'down');
+  assert.equal(priceTrend([], 7).dir, 'same');
+  assert.equal(priceTrend(h, null), null);
+  assert.deepEqual(priceBySupplier(h).map(s => [s.supplier, s.last, s.min]), [['Y', 9, 9], ['X', 12, 10]]);
+  assert.equal(pctText(33.333), '+33,3%');
+  assert.equal(pctText(-5), '-5%');
+});

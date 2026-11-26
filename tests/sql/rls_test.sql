@@ -66,6 +66,9 @@ select preco = 12.5 and lotes->0->>'validade' = '2027-01-10' as preco_lotes_ok f
 insert into public.movimentos(id,produto_id,produto,tipo,delta,antes,depois,preco,por_nome,feito_em)
   values (gen_random_uuid(),'11111111-1111-1111-1111-111111111111','Luva','saida',-1,3,2,12.5,'Bruna',now());
 select por_user = :FUNC::uuid as mov_por_user from public.movimentos;
+insert into public.movimentos(id,produto_id,produto,tipo,delta,antes,depois,preco,por_nome,feito_em)
+  values (gen_random_uuid(),'11111111-1111-1111-1111-111111111111','Luva','preco',0,2,2,13.9,'Bruna',now());
+select count(*) = 1 as mov_preco_ok from public.movimentos where tipo = 'preco';
 select pg_temp.esperar_erro($$insert into public.movimentos(id,produto_id,produto,tipo,delta,antes,depois,por_nome,feito_em) values (gen_random_uuid(),gen_random_uuid(),'x','roubo',-1,1,0,'B',now())$$, 'check');
 select pg_temp.esperar_erro($$update public.movimentos set delta = 5$$, 'permission denied');
 select pg_temp.esperar_erro($$delete from public.movimentos$$, 'permission denied');

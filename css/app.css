@@ -689,3 +689,43 @@ form.inline-form#lot-f { margin-top: 12px; padding-top: 14px; border-top: 1px so
 .pr-row .st svg { width: 14px; height: 14px; }
 .pr-row.bad .st { color: var(--red); }
 .pr-row.bad input { border-color: var(--red); }
+
+/* v0.7.2: histórico e comparação de preços */
+.small-link { display: inline-flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 14px; color: var(--gold); text-decoration: none; }
+.small-link svg { width: 18px; height: 18px; }
+.price-sum .wide { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline; padding-top: 12px; border-top: 1px solid var(--line); }
+.price-sum .wide span { display: inline; font-size: 15px; font-weight: 500; }
+.price-sum .wide small { flex-basis: 100%; color: var(--muted); font-size: 12.5px; }
+.up { color: var(--red); } .down { color: var(--green); }
+.price-sum .wide .up { color: var(--red); } .price-sum .wide .down { color: var(--green); }
+h3 .h-n { font-family: var(--sans); font-size: 14px; margin-left: 4px; }
+.pr-row { grid-template-rows: auto auto auto; row-gap: 6px; cursor: default; }
+.pr-row .nm { grid-column: 1; grid-row: 1 / span 2; align-self: start; cursor: text; font-weight: 400; margin: 0; }
+.pr-row .pin { grid-column: 2; grid-row: 1; }
+.pr-row .st { grid-row: 2; }
+.pr-row .tr { display: block; margin-top: 4px; font-size: 12.5px; color: var(--muted); }
+.pr-row .tr em, .facts .tr em { font-style: normal; font-weight: 600; margin-left: 4px; }
+.tr.up em { color: var(--red); } .tr.down em { color: var(--green); }
+.facts .tr { display: block; font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+.ph-tog { grid-column: 1; grid-row: 3; justify-self: start; display: inline-flex; align-items: center; gap: 6px; background: none; border: 0; padding: 4px 0; min-height: 0; color: var(--gold); font-size: 13.5px; font-weight: 500; box-shadow: none; }
+.ph-tog svg { width: 16px; height: 16px; }
+.ph-tog[aria-expanded="true"] { color: var(--text); }
+.ph-box { grid-column: 1 / -1; grid-row: 4; margin-top: 6px; padding: 14px; border-radius: 12px; background: rgba(243,239,231,.035); border: 1px solid var(--line); }
+.spark { display: block; width: 100%; height: 64px; }
+.spark polyline { fill: none; stroke: var(--gold); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+.spark polygon { fill: var(--gold-soft); stroke: none; }
+.spark-legend { display: flex; justify-content: space-between; gap: 8px; font-size: 11.5px; color: var(--muted); margin: 6px 0 4px; }
+.ph { list-style: none; margin: 8px 0 0; padding: 0; }
+.ph li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 14.5px; }
+.ph li:last-child { border-bottom: 0; }
+.ph li small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.ph li b { font-weight: 500; text-align: right; white-space: nowrap; }
+.ph li b em { display: block; font-style: normal; font-size: 12px; font-weight: 600; }
+.ph li b em.up { color: var(--red); } .ph li b em.down { color: var(--green); }
+.ph-sup { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.ph-sup .lbl { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 4px; letter-spacing: .02em; }
+.ph-sup > div { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; font-size: 14.5px; }
+.ph-sup small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+.ph-sup b { font-weight: 500; white-space: nowrap; }
+.ph-empty { margin: 0; }
+.price-hist .ph-empty + .small-link { margin-top: 12px; }

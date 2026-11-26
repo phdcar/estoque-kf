@@ -603,7 +603,7 @@ try {
     await nav(op, '#historico');
     await op.click('.fill-prices');
     await waitHash(op, '#precos');
-    const n0 = Number(await op.textContent('#pf-n'));
+    const n0 = Number(await op.textContent('[data-n=falta]'));
     assert.ok(n0 >= 1, 'deveria haver produtos sem preço');
     const rows = op.locator('.pr-row');
     const first = await rows.nth(0).getAttribute('data-id');
@@ -612,7 +612,7 @@ try {
     await op.waitForFunction(() => /Salvo/.test(document.querySelector('.pr-row .st')?.textContent || ''));
     assert.equal(await op.evaluate(() => document.activeElement === document.querySelectorAll('.pr-row input')[1]), true, 'Enter passa para o próximo');
     assert.equal(await rows.nth(0).locator('input').inputValue(), '3,20');
-    assert.equal(await op.textContent('#pf-n'), String(n0 - 1));
+    assert.equal(await op.textContent('[data-n=falta]'), String(n0 - 1));
     await rows.nth(1).locator('input').fill('abc');
     await rows.nth(1).locator('input').press('Tab');
     await op.waitForSelector('.pr-row.bad');
@@ -620,7 +620,28 @@ try {
     await rows.nth(1).locator('input').press('Tab');
     await synced(op);
     assert.equal(Number(fake.tables.produtos.find(p => p.id === first).preco), 3.2);
-    await shot(op, '19-precos');
+    // preço novo: compara com o anterior (subiu) e mostra o histórico
+    await op.click('#pf [data-f=todos]');
+    const r0 = op.locator(`.pr-row[data-id="${first}"]`);
+    await op.clock.runFor(60000); // um minuto depois
+    await r0.locator('input').fill('4');
+    await r0.locator('input').press('Tab');
+    await op.waitForFunction(id => /Antes R\$\s*3,20.*▲\s*\+25%/.test(document.querySelector(`.pr-row[data-id="${id}"] .tr`)?.textContent || ''), first);
+    assert.match(await op.textContent('#psum'), /▲ 1 subiu/);
+    await r0.locator('.ph-tog').click();
+    const hist = (await r0.locator('.ph-box').textContent()).replace(/\s+/g, ' ');
+    assert.match(hist, /R\$\s*4,00\s*▲ \+25%/);
+    assert.match(hist, /R\$\s*3,20/);
+    await synced(op);
+    assert.deepEqual(fake.tables.movimentos.filter(m => m.produto_id === first && m.tipo === 'preco').map(m => [Number(m.preco), m.delta]), [[3.2, 0], [4, 0]]);
+    await op.click('#pf [data-f=subiu]');
+    await op.waitForSelector('#pf [data-f=subiu].on');
+    assert.equal(await op.locator('.pr-row').count(), 1);
+    await r0.locator('.ph-tog').click();
+    await op.screenshot({ path: path.join(SHOTS, '19-precos.png'), fullPage: true });
+    await nav(op, '#produto/' + first);
+    assert.match((await op.textContent('.price-hist')).replace(/\s+/g, ' '), /preço atualizado/);
+    assert.match(await op.textContent('.facts'), /Antes R\$\s*3,20/);
   });
 
   await step('revisão visual: todas as telas no tamanho do iPhone (390x844)', async () => {

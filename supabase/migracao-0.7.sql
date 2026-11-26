@@ -11,7 +11,7 @@ create table if not exists public.movimentos (
   id          uuid primary key,
   produto_id  uuid not null,
   produto     text not null,
-  tipo        text not null check (tipo in ('entrada', 'saida', 'ajuste', 'conferencia', 'perda')),
+  tipo        text not null check (tipo in ('entrada', 'saida', 'ajuste', 'conferencia', 'perda', 'preco')),
   delta       int  not null,
   antes       int  not null,
   depois      int  not null check (depois >= 0),

@@ -12,7 +12,7 @@ export const MIN_HISTORY_DAYS = 7;   // menos que isso, ainda não dá para prev
 export const WINDOW_DAYS = 30;
 
 export function consumption(moves, productId, now = new Date(), windowDays = WINDOW_DAYS) {
-  const mine = moves.filter(m => m.productId === productId);
+  const mine = moves.filter(m => m.productId === productId && m.type !== 'preco');
   if (!mine.length) return { perDay: 0, used: 0, days: 0, enough: false };
   const first = Math.min(...mine.map(m => Date.parse(m.at)));
   const from = Math.max(first, now.getTime() - windowDays * DAY);
@@ -137,3 +137,47 @@ export function orderText(supplier, items, when = new Date()) {
     items.map(i => `• ${i.qty} × ${i.name}`).join('\n') + '\n\nObrigado!';
 }
 export const whatsappUrl = text => 'https://wa.me/?text=' + encodeURIComponent(text);
+
+// ---------- histórico de preços ----------
+// Cada preço registrado: mudança no cadastro ou na tela de preços (tipo "preco") e cada entrada de mercadoria com preço.
+// Guarda só os pontos em que o preço ou o fornecedor mudou.
+export function priceHistory(moves, productId) {
+  const pts = moves.filter(m => m.productId === productId && m.price != null && (m.type === 'preco' || (m.type === 'entrada' && m.delta > 0)))
+    .sort((a, b) => a.at.localeCompare(b.at));
+  const out = [];
+  for (const m of pts) {
+    const last = out[out.length - 1];
+    const pt = { at: m.at, price: Number(m.price), supplier: m.supplier || '', kind: m.type, by: m.by || '' };
+    if (last && last.price === pt.price && last.supplier === pt.supplier) continue;
+    out.push(pt);
+  }
+  return out;
+}
+
+// preço atual comparado com o anterior (o último preço diferente do atual)
+export function priceTrend(history, current) {
+  if (current == null) return null;
+  const cur = Number(current);
+  let curAt = null;
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].price === cur) { curAt = history[i].at; continue; }
+    const prev = history[i];
+    const pct = prev.price ? (cur - prev.price) / prev.price * 100 : null;
+    return { prev: prev.price, prevAt: prev.at, prevSupplier: prev.supplier, since: curAt, diff: cur - prev.price, pct, dir: cur > prev.price ? 'up' : 'down' };
+  }
+  return { prev: null, since: curAt, dir: 'same' };
+}
+
+// último e menor preço por fornecedor (para comparar fornecedores)
+export function priceBySupplier(history) {
+  const m = new Map();
+  for (const h of history) {
+    const k = h.supplier || 'Sem fornecedor';
+    const e = m.get(k) || { supplier: k, last: null, lastAt: null, min: Infinity, n: 0 };
+    e.last = h.price; e.lastAt = h.at; e.min = Math.min(e.min, h.price); e.n++;
+    m.set(k, e);
+  }
+  return [...m.values()].sort((a, b) => a.last - b.last);
+}
+
+export const pctText = pct => (pct == null ? '' : `${pct > 0 ? '+' : ''}${(Math.round(pct * 10) / 10).toLocaleString('pt-BR')}%`);
