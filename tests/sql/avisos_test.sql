@@ -107,3 +107,15 @@ select public.kf_aviso_validade();
 select count(*) = 1 as validade_no_marco_envia from net.chamadas where body->>'subject' like 'Estoque KF · Validade%';
 select body->>'subject' = 'Estoque KF · Validade: 1 produto(s) chegando ao prazo' and body->>'html' like '%vence em 7 dia(s)%' as assunto_validade
   from net.chamadas order by id desc limit 1;
+-- justificativa (versão 0.5)
+set role authenticated;
+select set_config('request.jwt.claim.sub', :DONO, false);
+insert into public.conferencias(id, dia, feita_em, por_nome, por_papel, por_user, itens, justificativa, dias) values
+  (gen_random_uuid(), '2026-11-30', '2026-11-30T12:00Z', 'Bruna', 'funcionario', :DONO, '[]', 'Faltei por motivo de saúde.', '{2026-11-27}');
+reset role;
+select body->>'subject' = 'Estoque KF · Justificativa de Bruna: conferência não feita'
+   and body->>'html' like '%27/11/2026%' and body->>'html' like '%Faltei por motivo de saúde.%' as email_justificativa
+  from net.chamadas order by id desc limit 1;
+set role authenticated;
+select pg_temp.esperar_erro($$insert into public.conferencias(id, dia, feita_em, por_nome, por_papel, por_user, itens, justificativa) values (gen_random_uuid(), '2026-11-30', now(), 'B', 'funcionario', auth.uid(), '[]', 'curta')$$, 'check');
+reset role;

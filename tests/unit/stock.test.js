@@ -72,3 +72,12 @@ test('comprar até o ideal', async () => {
   assert.equal(l[0].items[0].need, 44);
   assert.match(shoppingText(l), /comprar 44 \(tem 6, mínimo 10, ideal 50\)/);
 });
+
+test('nome só com a primeira letra maiúscula', async () => {
+  const { sentenceCase } = await import('../../js/stock.js');
+  assert.equal(sentenceCase('AGULHA 32G 6MM'), 'Agulha 32G 6mm');
+  assert.equal(sentenceCase('LUVA XP'), 'Luva XP');
+  assert.equal(sentenceCase('Luva de procedimento M'), 'Luva de procedimento M');
+  assert.equal(sentenceCase('GAZE Estéril'), 'Gaze estéril');
+  assert.equal(sentenceCase('álcool 70%'), 'Álcool 70%');
+});

@@ -167,6 +167,19 @@ language plpgsql security definer set search_path = public as $$
 declare c record; difs int; total int; lista text;
 begin
   for c in select * from novas loop
+    if c.justificativa is not null then
+      perform kf_enviar_email(
+        format('Estoque KF · Justificativa de %s: conferência não feita', c.por_nome),
+        format('<div style="font-family:Arial,sans-serif;color:#121A24;max-width:560px">'
+          '<div style="background:#121A24;color:#F3EFE7;padding:14px 18px;border-radius:10px 10px 0 0"><b style="font-size:17px">Clínica KF</b><br><span style="color:#CDB27E;font-size:12px;letter-spacing:2px">CONFERÊNCIA</span></div>'
+          '<p><b>%s</b> não fez a conferência em: <b>%s</b>.</p><p>Justificativa enviada em %s:</p>'
+          '<blockquote style="margin:0;padding:10px 14px;border-left:3px solid #CDB27E;background:#F6F3EE">%s</blockquote>'
+          '<p style="color:#6E675C;font-size:12px">Aviso automático do app de estoque.</p></div>',
+          kf_html(c.por_nome),
+          coalesce((select string_agg(to_char(d, 'DD/MM/YYYY'), ', ' order by d) from unnest(c.dias) d), to_char(c.dia, 'DD/MM/YYYY')),
+          to_char(c.feita_em at time zone 'America/Sao_Paulo', 'DD/MM/YYYY "às" HH24:MI'), kf_html(c.justificativa)));
+      continue;
+    end if;
     select count(*), count(*) filter (where (i->>'counted')::int <> (i->>'before')::int),
            string_agg(case when (i->>'counted')::int <> (i->>'before')::int then
              format('<li>%s: sistema %s, contado <b>%s</b></li>', kf_html(i->>'name'), i->>'before', i->>'counted') end, '')

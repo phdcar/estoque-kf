@@ -1,13 +1,13 @@
 import { db } from './db.js';
 import { processPhoto } from './lineart.js';
-import { ymd, countStatus, history, isCountDay } from './schedule.js';
-import { level, isLow, missing, need, shoppingList, shoppingText, summary, buy, expiryLevel, expiryText, daysToExpiry, EXPIRY_SOON, NO_EXPIRY } from './stock.js';
+import { ymd, countStatus, history, isWeekday } from './schedule.js';
+import { level, isLow, missing, need, shoppingList, shoppingText, summary, buy, sentenceCase, expiryLevel, expiryText, daysToExpiry, EXPIRY_SOON, NO_EXPIRY } from './stock.js';
 import { illustrationFor, SKETCH_FILTER } from './illustrations.js';
 import { I } from './icons.js';
 import * as cloud from './cloud.js';
 import { startAmbient, skyState, PERIOD_NAME, tapURI } from './ambient.js';
 
-export const APP_VERSION = '0.4.0';
+export const APP_VERSION = '0.5.0';
 export { isLow };
 
 // ---------- utilidades ----------
@@ -21,6 +21,7 @@ const uuid = () => (crypto.randomUUID ? crypto.randomUUID()
     }));
 const fmtDay = s => { const [y, m, d] = s.split('-'); return `${d}/${m}/${y}`; };
 const WEEK = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
+const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
 const weekday = s => { const [y, m, d] = s.split('-').map(Number); return WEEK[new Date(y, m - 1, d).getDay()]; };
 const fmtTime = iso => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const fmtDateTime = iso => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -62,6 +63,18 @@ async function load() {
   S.schedule = await db.get('settings', 'schedule') || null;
   S.products = (await db.all('products')).filter(p => !p.deleted);
   S.counts = await db.all('counts');
+  updateBadge();
+}
+
+// número no ícone do app (iPhone com iOS 16.4+ e app instalado na tela de início; Android/Chrome)
+// = produtos abaixo do alerta + vencidos. Com o app fechado, só atualiza quando houver notificação push (etapa 3).
+const badgeCount = () => S.products.filter(p => isLow(p) || expiryLevel(p, now()) === 'vencido').length;
+function updateBadge() {
+  try {
+    if (!('setAppBadge' in navigator) || !S.profile) return;
+    const n = badgeCount();
+    (n ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => {});
+  } catch { /* sem suporte */ }
 }
 
 async function photoUrls(p) {
@@ -292,11 +305,17 @@ function viewSetup(mode = 'entrar', info = '') {
 // ---------- peças comuns ----------
 function countBanner() {
   const st = status();
+  const daysTxt = ds => ds.map(d => `${weekday(d)}, ${fmtDay(d)}`).join('; ');
+  if (st.missing?.length) {
+    return isOwner()
+      ? `<a href="#historico" class="banner red">${I.alert}<span><b>Conferência não feita</b> e ainda sem justificativa: ${daysTxt(st.missing)}.</span></a>`
+      : `<a href="#conferencia" class="banner red">${I.alert}<span><b>Falta justificar</b> por que não houve conferência: ${daysTxt(st.missing)}.</span></a>`;
+  }
   if (st.state === 'atrasada') {
-    return `<a href="#conferencia" class="banner red">${I.alert}<span><b>Conferência atrasada</b> (dia ${fmtDay(st.due)}). ${isOwner() ? 'O funcionário ainda não contou o estoque.' : 'Faça a contagem agora.'}</span></a>`;
+    return `<a href="#conferencia" class="banner red">${I.alert}<span><b>Conferência atrasada.</b> ${isOwner() ? 'O prazo de hoje passou e o funcionário ainda não contou o estoque.' : 'O prazo de hoje passou. Faça a contagem agora.'}</span></a>`;
   }
   if (st.state === 'pendente') {
-    return `<a href="#conferencia" class="banner amber">${I.check}<span>Hoje é dia de conferência. Prazo até ${esc(S.schedule?.deadline || '18:00')}.</span></a>`;
+    return `<a href="#conferencia" class="banner amber">${I.check}<span>Conferência de hoje ainda não feita. Prazo até ${esc(S.schedule?.deadline || '18:00')}.</span></a>`;
   }
   if (st.state === 'feita' && isOwner() && st.due === st.today) {
     return `<div class="banner green">${I.ok}<span>Conferência de hoje feita por ${esc(st.count.by)} às ${fmtTime(st.count.at)}.</span></div>`;
@@ -335,7 +354,7 @@ function prodRow(p) {
       </div>
       <div class="qty">
         <button class="secondary" data-act="dec" aria-label="Diminuir ${esc(p.name)}">−</button>
-        <span><span class="n">${p.quantity}</span><span class="of">mín. ${Number(p.min) >= 1 ? p.min : '—'}</span></span>
+        <span class="qv"><span class="n">${p.quantity}</span><span class="of">mín. ${Number(p.min) >= 1 ? p.min : '—'}</span></span>
         <button class="secondary" data-act="inc" aria-label="Aumentar ${esc(p.name)}">+</button>
       </div>
     </li>`;
@@ -402,7 +421,7 @@ async function viewDashboard() {
     <section class="radar-card" aria-label="Radar de estoque">
       <div class="face-tap" aria-hidden="true"><div class="shB"><div class="shP"></div></div></div>
       <div class="radar ${sm.alerta ? 'alert' : ''}">${radarSvg(S.products)}
-        <div class="ctr"><b id="radar-n">${sm.alerta}</b><span>em alerta</span></div></div>
+        <div class="ctr"><b id="radar-n">${sm.alerta}</b><span>Em alerta</span></div></div>
       <div class="kpis">
         <a class="kpi red" href="#estoque/alerta"><span><i style="background:#F2A49C"></i>Abaixo do mínimo</span><b>${sm.alerta}</b></a>
         <a class="kpi red" href="#estoque/alerta"><span><i style="background:#E0796F"></i>Esgotados (zerados)</span><b>${sm.esgotado}</b></a>
@@ -632,7 +651,7 @@ async function viewForm(id) {
   };
   $('#f').onsubmit = async e => {
     e.preventDefault();
-    const name = $('#nm').value.trim().replace(/\s+/g, ' ');
+    const name = sentenceCase($('#nm').value.trim().replace(/\s+/g, ' '));
     const cat = $('#ct').value.trim().replace(/\s+/g, ' ');
     const sup = $('#fn').value.trim().replace(/\s+/g, ' ');
     const qt = $('#qt').value.trim(), mn = $('#mn').value.trim();
@@ -670,23 +689,52 @@ const draftKey = () => 'kf-contagem-' + ymd(now());
 function loadDraft() { try { return JSON.parse(localStorage.getItem(draftKey()) || '{}'); } catch { return {}; } }
 function saveDraft(d) { try { localStorage.setItem(draftKey(), JSON.stringify(d)); } catch { /* sem espaço */ } }
 
+async function viewJustify(st) {
+  main().innerHTML = `
+    <div class="banner lock">${I.lock}<span><b>Conferência não feita.</b> A contagem é diária, de segunda a sexta. Explique o motivo para liberar o app.</span></div>
+    <div class="eyebrow">Conferência</div>
+    <h2>Justificativa</h2>
+    <div class="card">
+      <p style="margin-top:0">${st.missing.length === 1 ? 'Dia sem conferência:' : 'Dias sem conferência:'}</p>
+      <ul id="jdays" style="margin:0 0 6px;padding-left:18px">${st.missing.map(d => `<li>${cap(weekday(d))}, ${fmtDay(d)}</li>`).join('')}</ul>
+      <label for="jt">Por que a conferência não foi feita? <span class="req" aria-hidden="true">*</span></label>
+      <textarea id="jt" rows="4" maxlength="500" placeholder="Ex.: faltei por motivo de saúde."></textarea>
+      <div class="hint">O dono recebe a justificativa por e-mail e ela fica no histórico.</div>
+      <div id="jerr" class="banner red hidden" style="margin:12px 0 0"></div>
+      <p style="margin-bottom:0"><button class="block" id="jsend">Enviar justificativa</button></p>
+    </div>`;
+  $('#jsend').onclick = async () => {
+    const text = $('#jt').value.trim().replace(/\s+/g, ' ');
+    if (text.length < 10) { $('#jerr').textContent = 'Escreva o motivo com pelo menos 10 letras.'; $('#jerr').classList.remove('hidden'); $('#jt').focus(); return; }
+    $('#jsend').disabled = true;
+    const rec = { id: uuid(), date: ymd(now()), at: now().toISOString(), by: S.profile.name, role: S.profile.role, items: [], justification: text, days: st.missing, _dirty: true };
+    await db.put('counts', rec);
+    cloud.syncSoon();
+    toast('Justificativa enviada ao dono.');
+    render();
+  };
+}
+
 async function viewCount(forceStart) {
   const st = status();
   const products = [...S.products].sort(byName);
+  if (st.missing?.length && !isOwner() && !forceStart) return viewJustify(st);
   if (!st.locked && !forceStart) {
     const today = ymd(now());
     let msg;
     if (st.state === 'sem-produtos') msg = 'Cadastre produtos para começar as conferências.';
-    else if (st.state === 'primeiro-dia') msg = 'Os produtos são recém-cadastrados. A conferência obrigatória começa no próximo dia de conferência.';
+    else if (st.state === 'primeiro-dia') msg = 'Os produtos foram cadastrados hoje. A conferência obrigatória começa no próximo dia útil.';
     else if (st.state === 'nao-iniciada') msg = `A primeira conferência será em ${fmtDay(st.next)} (${weekday(st.next)}).`;
-    else msg = `Conferência ${st.due === today ? 'de hoje' : `do dia ${fmtDay(st.due)}`} feita por <b>${esc(st.count.by)}</b> em ${fmtDateTime(st.count.at)}.`;
+    else if (st.state === 'fim-de-semana') msg = 'Hoje é fim de semana: não há conferência obrigatória.';
+    else if (st.missing?.length) msg = `Conferência de hoje feita. Ainda falta a justificativa de ${plural(st.missing.length, 'dia', 'dias')} sem conferência.`;
+    else msg = `Conferência de hoje feita por <b>${esc(st.count.by)}</b> em ${fmtDateTime(st.count.at)}.`;
     main().innerHTML = `
       <div class="eyebrow">Conferência</div>
       <h2>Contagem do estoque</h2>
       <div class="banner green">${I.ok}<span>${msg}</span></div>
       <div class="card">
         <p style="margin-top:0">Próxima conferência: <b>${fmtDay(st.next)}</b> (${weekday(st.next)}).</p>
-        <p class="small muted" style="margin-bottom:0">Hoje ${isCountDay(today, S.schedule?.startDate || today) ? 'é' : 'não é'} dia de conferência. As conferências são feitas em dias alternados.</p>
+        <p class="small muted" style="margin-bottom:0">A conferência é diária, de segunda a sexta-feira. Dia útil sem conferência precisa de justificativa.${isWeekday(today) ? '' : ' Hoje não é dia útil.'}</p>
       </div>
       ${products.length ? `<button class="block secondary" id="extra">Fazer uma contagem extra agora</button>` : ''}`;
     const ex = $('#extra');
@@ -695,8 +743,8 @@ async function viewCount(forceStart) {
   }
   const draft = loadDraft();
   main().innerHTML = `
-    ${st.locked && !isOwner() ? `<div class="banner lock">${I.lock}<span><b>Hoje é dia de conferência.</b> Conte todos os produtos para liberar o app.</span></div>` : ''}
-    ${st.state === 'atrasada' ? `<div class="banner red">${I.alert}<span>Conferência atrasada (dia ${fmtDay(st.due)}).</span></div>` : ''}
+    ${st.locked && !isOwner() ? `<div class="banner lock">${I.lock}<span><b>Conferência diária.</b> Conte todos os produtos para liberar o app.</span></div>` : ''}
+    ${st.state === 'atrasada' ? `<div class="banner red">${I.alert}<span>Conferência atrasada: o prazo de hoje (${esc(S.schedule?.deadline || '18:00')}) já passou.</span></div>` : ''}
     <div class="eyebrow">Conferência</div>
     <h2>Contagem do estoque</h2>
     <p class="muted small">Conte cada produto e digite a quantidade que existe de verdade na prateleira.</p>
@@ -762,22 +810,28 @@ async function viewHistory() {
   const st = status();
   const rows = S.schedule ? history({ now: now(), start: S.schedule.startDate, deadline: S.schedule.deadline, counts: S.counts, productDays: S.products.map(p => ymd(new Date(p.createdAt))) }) : [];
   const label = {
-    'feita': ['Feita', 'ok'], 'feita-atrasada': ['Feita com atraso', 'late'], 'nao-feita': ['Não feita', 'bad'],
+    'feita': ['Feita', 'ok'], 'justificada': ['Justificada', 'late'], 'nao-feita': ['Não feita', 'bad'], 'primeiro-dia': ['Sem cobrança (produtos novos)', ''],
     'atrasada': ['Atrasada', 'bad'], 'pendente': ['Pendente', 'late'], 'sem-cobranca': ['Sem cobrança (produtos novos)', ''],
   };
-  const all = [...S.counts].sort((a, b) => b.at.localeCompare(a.at));
+  const all = S.counts.filter(c => !c.justification).sort((a, b) => b.at.localeCompare(a.at));
+  const justs = S.counts.filter(c => c.justification).sort((a, b) => b.at.localeCompare(a.at));
   const diffs = c => c.items.filter(i => i.counted !== i.before);
   main().innerHTML = `
     ${countBanner()}
     <div class="eyebrow">Histórico</div>
     <h2>Conferências</h2>
-    <div class="card small">Conferências em dias alternados desde ${S.schedule ? fmtDay(S.schedule.startDate) : '—'}. Prazo diário: ${esc(S.schedule?.deadline || '18:00')}. Próxima: <b>${fmtDay(st.next)}</b>.</div>
-    <h3>Por dia de conferência</h3>
+    <div class="card small">Conferência diária, de segunda a sexta-feira, desde ${S.schedule ? fmtDay(S.schedule.startDate) : '—'}. Prazo: ${esc(S.schedule?.deadline || '18:00')}. Dia útil sem conferência precisa de justificativa.</div>
+    <h3>Por dia útil</h3>
     ${rows.length ? `<div class="card" style="padding:4px 12px"><table class="hist"><thead><tr><th>Dia</th><th>Situação</th><th>Quem e quando</th></tr></thead><tbody>
-      ${rows.map(r => `<tr><td>${fmtDay(r.day)}<br><span class="muted small">${weekday(r.day)}</span></td>
+      ${rows.map(r => `<tr><td>${fmtDay(r.day)}<br><span class="muted small">${cap(weekday(r.day))}</span></td>
         <td class="st ${label[r.state][1]}">${label[r.state][0]}</td>
-        <td>${r.count ? `${esc(r.count.by)}<br><span class="muted small">${fmtDateTime(r.count.at)}</span>` : '—'}</td></tr>`).join('')}
+        <td>${r.count ? `${esc(r.count.by)}<br><span class="muted small">${fmtDateTime(r.count.at)}</span>`
+          : r.justification ? `${esc(r.justification.by)}: “${esc(r.justification.justification)}”<br><span class="muted small">${fmtDateTime(r.justification.at)}</span>` : '—'}</td></tr>`).join('')}
     </tbody></table></div>` : `<p class="muted">Ainda não houve dia de conferência.</p>`}
+    ${justs.length ? `<h3>Justificativas</h3>${justs.map(c => `
+      <div class="card"><b>${esc(c.by)}</b> <span class="muted small">· ${fmtDateTime(c.at)}</span>
+        <div class="small muted">${(c.days || [c.date]).map(d => `${cap(weekday(d))}, ${fmtDay(d)}`).join('; ')}</div>
+        <p style="margin-bottom:0">“${esc(c.justification)}”</p></div>`).join('')}` : ''}
     <h3>Todas as contagens</h3>
     ${all.length ? all.map(c => `
       <div class="card">
@@ -813,15 +867,21 @@ async function viewSettings() {
       <form id="fs">
         <label for="sd" style="margin-top:0">Primeiro dia de conferência</label>
         <input id="sd" type="date" value="${esc(S.schedule?.startDate || ymd(now()))}">
-        <div class="hint">Depois disso, a conferência é feita em dias alternados.</div>
+        <div class="hint">A partir desse dia, a conferência é diária, de segunda a sexta-feira.</div>
         <label for="dl">Horário limite</label>
         <input id="dl" type="time" value="${esc(S.schedule?.deadline || '18:00')}">
-        <div class="hint">Passado esse horário sem conferência, ela aparece como atrasada.</div>
+        <div class="hint">Passado esse horário sem conferência, ela aparece como atrasada. Dia útil que terminar sem conferência precisa de justificativa do funcionário.</div>
         <p style="margin-bottom:0"><button class="block">Salvar conferência</button></p>
       </form>
     </div>
     <h3>Pessoas com acesso</h3>
     <div class="card"><div id="members" class="small muted">Carregando…</div></div>` : ''}
+    <h3>Número no ícone</h3>
+    <div class="card small">
+      <p style="margin-top:0">Mostra no ícone do app quantos produtos estão abaixo do alerta ou vencidos, sem precisar abrir o app.</p>
+      <p id="badge-st" class="muted">${'setAppBadge' in navigator ? (typeof Notification !== 'undefined' && Notification.permission === 'granted' ? 'Ativado neste celular.' : 'Ainda não ativado neste celular.') : 'Este navegador não mostra número no ícone. No iPhone, instale o app na tela de início (iOS 16.4 ou mais novo) e abra por lá.'}</p>
+      ${'setAppBadge' in navigator && typeof Notification !== 'undefined' && Notification.permission !== 'granted' ? '<p style="margin-bottom:0"><button class="block secondary" id="badge-on">Ativar número no ícone</button></p>' : ''}
+    </div>
     <h3>Instalar no celular</h3>
     <div class="card small">
       <p style="margin-top:0"><b>iPhone (Safari):</b> toque em Compartilhar e depois em “Adicionar à Tela de Início”.</p>
@@ -844,6 +904,14 @@ async function viewSettings() {
     await cloud.signOut();
     await db.clearData();
     go('#painel');
+  };
+  const bo = $('#badge-on');
+  if (bo) bo.onclick = async () => {
+    try {
+      const r = await Notification.requestPermission();
+      if (r === 'granted') { updateBadge(); $('#badge-st').textContent = 'Ativado neste celular.'; bo.remove(); toast('Número no ícone ativado'); }
+      else $('#badge-st').textContent = 'Permissão negada. Para ativar depois, libere as notificações do app nos ajustes do celular.';
+    } catch { $('#badge-st').textContent = 'Não foi possível ativar neste celular.'; }
   };
   if (!isOwner()) return;
   $('#newcode').onclick = async () => {

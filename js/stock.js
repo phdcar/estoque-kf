@@ -112,3 +112,19 @@ export function expiryText(p, now = new Date()) {
   const [y, m, dd] = p.expiry.split('-');
   return `Validade ${dd}/${m}/${y}`;
 }
+
+// Nomes sempre com só a primeira letra maiúscula (regra do dono).
+// Preserva códigos como 32G, 30 UI, XP; unidades ficam em minúsculas (ml, mm, cm, g).
+const KEEP = /^(\d+G|\d+L|UI|XP|KF|ND|L)$/;
+export function sentenceCase(s) {
+  const t = String(s || '').trim();
+  if (!t) return t;
+  const parts = t.split(' ');
+  const words = parts.map((w, i) => {
+    if (i === parts.length - 1 && i > 0 && /^(PP|P|M|G|GG|XG)$/i.test(w)) return w.toUpperCase(); // tamanho
+    if (KEEP.test(w.toUpperCase()) && /\d|UI|XP|KF|ND|^L$/i.test(w)) return w.toUpperCase().replace(/^(\d+)G$/, '$1G');
+    return w.toLowerCase();
+  });
+  const out = words.join(' ');
+  return out.charAt(0).toUpperCase() + out.slice(1);
+}

@@ -100,10 +100,12 @@ const fromRemoteProduct = r => ({
   updatedAt: new Date(r.atualizado_em).toISOString(), updatedBy: r.atualizado_por, deleted: r.excluido,
 });
 const toRemoteCount = c => ({
-  id: c.id, dia: c.date, feita_em: c.at, por_nome: c.by, por_papel: c.role, itens: c.items,
+  id: c.id, dia: c.date, feita_em: c.at, por_nome: c.by, por_papel: c.role, itens: c.items || [],
+  justificativa: c.justification || null, dias: c.days || null,
 });
 const fromRemoteCount = r => ({
-  id: r.id, date: r.dia, at: new Date(r.feita_em).toISOString(), by: r.por_nome, role: r.por_papel, items: r.itens,
+  id: r.id, date: r.dia, at: new Date(r.feita_em).toISOString(), by: r.por_nome, role: r.por_papel, items: r.itens || [],
+  justification: r.justificativa || null, days: r.dias || null,
 });
 const photoPath = (id, key, kind) => `${id}/${key}-${kind === 'original' ? 'original.jpg' : 'traco.png'}`;
 

@@ -55,6 +55,9 @@ create table if not exists public.conferencias (
   servidor_em timestamptz not null default now()
 );
 create index if not exists conferencias_servidor_em on public.conferencias (servidor_em);
+-- versão 0.5: conferência diária (segunda a sexta); dia útil sem conferência recebe justificativa
+alter table public.conferencias add column if not exists justificativa text check (justificativa is null or length(trim(justificativa)) >= 10);
+alter table public.conferencias add column if not exists dias date[];
 
 -- ---------- gatilhos ----------
 create or replace function public.kf_marcar_servidor() returns trigger
