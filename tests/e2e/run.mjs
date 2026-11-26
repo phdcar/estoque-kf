@@ -284,16 +284,16 @@ try {
   });
 
   await step('rascunho da contagem sobrevive a fechar o app; só conclui com tudo contado', async () => {
-    const inputs = page.locator('#clist input');
-    await inputs.nth(0).fill('2');  // Álcool (ordem alfabética)
-    await inputs.nth(1).fill('18'); // Gaze
+    const ci = name => page.locator('#clist li', { hasText: name }).locator('input');
+    await ci('Álcool').fill('2');
+    await ci('Gaze').fill('18');
     assert.equal(await page.isDisabled('#finish'), true);
     await page.reload();
     await page.waitForSelector('#clist');
-    assert.equal(await inputs.nth(0).inputValue(), '2');
-    assert.equal(await inputs.nth(1).inputValue(), '18');
+    assert.equal(await ci('Álcool').inputValue(), '2');
+    assert.equal(await ci('Gaze').inputValue(), '18');
     assert.equal(await page.textContent('#done-n'), '2');
-    await inputs.nth(2).fill('10'); // Luva
+    await ci('Luva').fill('10');
     assert.equal(await page.isDisabled('#finish'), false);
     await page.click('#finish');
     await page.waitForFunction(() => location.hash === '#estoque');
@@ -336,8 +336,7 @@ try {
     await shot(page, '16-justificativa');
     await page.click('#jsend');
     await page.waitForSelector('#clist');
-    const inputs = page.locator('#clist input');
-    for (let i = 0; i < 3; i++) await inputs.nth(i).fill(String([2, 18, 9][i]));
+    for (const [n, v] of [['Álcool', 2], ['Gaze', 18], ['Luva', 9]]) await page.locator('#clist li', { hasText: n }).locator('input').fill(String(v));
     await page.click('#finish');
     await waitHash(page, '#estoque');
   });
@@ -642,6 +641,31 @@ try {
     await nav(op, '#produto/' + first);
     assert.match((await op.textContent('.price-hist')).replace(/\s+/g, ' '), /preço atualizado/);
     assert.match(await op.textContent('.facts'), /Antes R\$\s*3,20/);
+  });
+
+  await step('conferência rápida: mais usados primeiro e "Próximo" pula para o seguinte', async () => {
+    // dois itens parados (sem uso no mês) para separar as seções
+    for (const n of ['Campo cirúrgico', 'Fio de sutura']) {
+      await nav(op, '#novo');
+      await op.fill('#nm', n); await op.fill('#ct', 'Insumos'); await op.fill('#fn', 'Dental Cremer');
+      await op.fill('#qt', '40'); await op.fill('#mn', '5'); await op.check('#nd');
+      await op.click('#save'); await waitHash(op, '#produto/');
+    }
+    await nav(op, '#conferencia');
+    if (await op.$('#extra')) await op.click('#extra');
+    await op.waitForSelector('#clist input');
+    const names = (await op.locator('#clist li .info').allTextContents()).map(t => t.replace(/\s+/g, ' ').trim());
+    console.log('       ordem da contagem:', names.join(' | '));
+    const secs = (await op.locator('.count-sec h3').allTextContents()).map(t => t.replace(/\s+/g, ' ').trim());
+    assert.deepEqual(secs, ['Conferir primeiro 3', 'Pouco movimento 2']);
+    assert.match(names[3], /^Campo cirúrgico/);
+    await op.waitForTimeout(900); await op.screenshot({ path: path.join(SHOTS, '20-conferencia-ordem.png'), fullPage: true });
+    const inputs = op.locator('#clist input');
+    await inputs.nth(0).fill('1');
+    await inputs.nth(0).press('Enter');
+    assert.equal(await op.evaluate(() => document.activeElement === document.querySelectorAll('#clist input')[1]), true);
+    await inputs.nth(0).fill('');
+    await op.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith('kf-contagem-')).forEach(k => localStorage.removeItem(k)));
   });
 
   await step('revisão visual: todas as telas no tamanho do iPhone (390x844)', async () => {

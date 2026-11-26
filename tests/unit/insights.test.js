@@ -120,3 +120,20 @@ test('histórico de preços: mudanças, tendência e fornecedores', async () => 
   assert.equal(pctText(33.333), '+33,3%');
   assert.equal(pctText(-5), '-5%');
 });
+
+test('ordem da conferência: perto do mínimo e mais usados primeiro', async () => {
+  const { countPlan } = await import('../../js/insights.js');
+  const now = new Date('2026-11-26T12:00:00Z');
+  const ps = [{ id: 'a', name: 'Álcool' }, { id: 'b', name: 'Bisturi' }, { id: 'c', name: 'Compressa' }, { id: 'd', name: 'Dente' }, { id: 'e', name: 'Esponja' }];
+  const mv = (productId, type, delta, at) => ({ productId, type, delta, at });
+  const moves = [
+    mv('b', 'saida', -2, '2026-11-25T10:00:00Z'),
+    mv('c', 'saida', -9, '2026-11-10T10:00:00Z'),
+    mv('d', 'saida', -50, '2026-09-01T10:00:00Z'),   // antigo: não conta
+    mv('e', 'preco', 0, '2026-11-25T10:00:00Z'),     // preço não é movimento de estoque
+  ];
+  const plan = countPlan(ps, moves, now, p => p.id === 'a');
+  assert.deepEqual(plan.first.map(x => x.p.id), ['a', 'c', 'b']);
+  assert.deepEqual(plan.later.map(x => x.p.id), ['d', 'e']);
+  assert.equal(plan.first[2].moved7, true);
+});

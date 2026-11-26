@@ -7,10 +7,10 @@ import { I } from './icons.js';
 import * as cloud from './cloud.js';
 import { startAmbient, skyState, PERIOD_NAME, tapURI } from './ambient.js';
 import { consumption, forecastDays, suggestLevels, rateText, forecastText, withQuantity, addLot, lotsTotal, sortedLots,
-  expiriesByMonth, stockValue, monthSummary, monthKey, brl, orderText, whatsappUrl, priceHistory, priceTrend, priceBySupplier, pctText } from './insights.js';
+  expiriesByMonth, stockValue, monthSummary, monthKey, brl, orderText, whatsappUrl, priceHistory, priceTrend, priceBySupplier, pctText, countPlan } from './insights.js';
 import { scanBarcode } from './scanner.js';
 
-export const APP_VERSION = '0.7.2';
+export const APP_VERSION = '0.7.3';
 export { isLow };
 
 // ---------- utilidades ----------
@@ -1052,6 +1052,15 @@ async function viewCount(forceStart) {
     return;
   }
   const draft = loadDraft();
+  const plan = countPlan(products, S.moves, now(), p => ['esgotado', 'critico', 'atencao'].includes(level(p)));
+  const tag = x => x.near ? '<span class="pill amber">Atenção</span>' : x.used ? '<span class="pill gray">Mais usado</span>' : x.moved7 ? '<span class="pill gray">Mexido esta semana</span>' : '';
+  const item = (x, withTag) => { const p = x.p; return `
+        <li class="count-item" data-id="${p.id}">
+          ${thumbHtml(p)}
+          <div class="info">${esc(p.name)}${p.supplier ? `<small>${esc(p.supplier)}</small>` : ''}${withTag ? tag(x) : ''}</div>
+          <input type="number" inputmode="numeric" enterkeyhint="next" min="0" step="1" placeholder="?" aria-label="Quantidade de ${esc(p.name)}" value="${esc(draft[p.id] ?? '')}">
+        </li>`; };
+  const split = plan.first.length && plan.later.length;
   main().innerHTML = `
     ${st.locked && !isOwner() ? `<div class="banner lock">${I.lock}<span><b>Conferência diária.</b> Conte todos os produtos para liberar o app.</span></div>` : ''}
     ${st.state === 'atrasada' ? `<div class="banner red">${I.alert}<span>Conferência atrasada: o prazo de hoje (${esc(S.schedule?.deadline || '18:00')}) já passou.</span></div>` : ''}
@@ -1061,14 +1070,14 @@ async function viewCount(forceStart) {
     <div class="count-tools"><div class="small"><b id="done-n">0</b> de ${products.length} contados</div>
       ${products.some(p => p.barcode) ? `<button type="button" class="secondary small-btn" id="c-scan">${I.scan}Ler código</button>` : ''}</div>
     <div class="progress"><div id="bar" style="width:0%"></div></div>
-    <ul class="list" id="clist">
-      ${products.map(p => `
-        <li class="count-item" data-id="${p.id}">
-          ${thumbHtml(p)}
-          <div class="info">${esc(p.name)}${p.supplier ? `<small>${esc(p.supplier)}</small>` : ''}</div>
-          <input type="number" inputmode="numeric" min="0" step="1" placeholder="?" aria-label="Quantidade de ${esc(p.name)}" value="${esc(draft[p.id] ?? '')}">
-        </li>`).join('')}
-    </ul>
+    <div id="clist">
+      ${split ? `<div class="count-sec"><h3>Conferir primeiro <span class="muted h-n">${plan.first.length}</span></h3>
+        <p class="small muted">Os que mais mudam e os que estão perto do mínimo. É onde a contagem costuma errar, então conte com calma.</p></div>` : ''}
+      <ul class="list">${(split ? plan.first : [...plan.first, ...plan.later].sort((a, b) => byName(a.p, b.p))).map(x => item(x, split)).join('')}</ul>
+      ${split ? `<div class="count-sec"><h3>Pouco movimento <span class="muted h-n">${plan.later.length}</span></h3>
+        <p class="small muted">Quase não mudaram no último mês.</p></div>
+      <ul class="list">${plan.later.map(x => item(x, false)).join('')}</ul>` : ''}
+    </div>
     <div id="cerr" class="banner red hidden"></div>
     <div class="sticky-bottom"><button class="block" id="finish" disabled>Concluir conferência</button></div>`;
   const update = () => {
@@ -1087,6 +1096,13 @@ async function viewCount(forceStart) {
     $('#finish').disabled = n !== products.length;
   };
   $('#clist').oninput = update;
+  const cin = $$('#clist input');
+  cin.forEach((inp, i) => inp.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const next = cin.slice(i + 1).find(x => x.value.trim() === '') || cin[i + 1];
+    if (next) { next.focus(); next.closest('li').scrollIntoView({ block: 'center', behavior: 'smooth' }); } else inp.blur();
+  }));
   update();
   const cs = $('#c-scan');
   if (cs) cs.onclick = async () => {

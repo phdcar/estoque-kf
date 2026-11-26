@@ -181,3 +181,21 @@ export function priceBySupplier(history) {
 }
 
 export const pctText = pct => (pct == null ? '' : `${pct > 0 ? '+' : ''}${(Math.round(pct * 10) / 10).toLocaleString('pt-BR')}%`);
+
+// ---------- ordem da conferência ----------
+// Primeiro o que mais muda (usado nos últimos 30 dias, mexido na última semana) e o que está perto do mínimo;
+// depois o que quase não mexe. Assim, os erros mais prováveis são conferidos com mais atenção, no começo.
+export function countPlan(products, moves, now = new Date(), isNear = () => false) {
+  const t = now.getTime(), from30 = t - 30 * DAY, from7 = t - 7 * DAY;
+  const byName = (a, b) => a.p.name.localeCompare(b.p.name, 'pt-BR');
+  const info = products.map(p => {
+    const mine = moves.filter(m => m.productId === p.id && m.type !== 'preco' && m.delta !== 0 && Date.parse(m.at) >= from30);
+    const used = Math.max(0, -mine.filter(m => CONSUME_TYPES.includes(m.type)).reduce((n, m) => n + m.delta, 0));
+    const moved7 = mine.some(m => Date.parse(m.at) >= from7);
+    const near = !!isNear(p);
+    return { p, used, moved7, near, moves: mine.length, score: (near ? 1e6 : 0) + used * 100 + mine.length * 10 + (moved7 ? 5 : 0) };
+  });
+  const hot = info.filter(x => x.near || x.used > 0 || x.moved7).sort((a, b) => b.score - a.score || byName(a, b));
+  const calm = info.filter(x => !hot.includes(x)).sort(byName);
+  return { first: hot, later: calm };
+}
