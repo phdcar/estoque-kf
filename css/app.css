@@ -670,3 +670,22 @@ form.inline-form#lot-f { margin-top: 12px; padding-top: 14px; border-top: 1px so
 .scan-manual { display: flex; gap: 10px; }
 .scan-manual input { flex: 1; min-width: 0; }
 .scan-manual button { width: auto; padding: 0 18px; }
+
+/* v0.7.1: preencher preços de uma vez */
+.fill-prices { margin-top: 18px; }
+.price-sum { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.price-sum span { display: block; font-size: 13px; color: var(--muted); }
+.price-sum b { display: block; font-size: 22px; font-weight: 400; margin-top: 4px; }
+.price-list { padding-top: 6px; padding-bottom: 6px; }
+.pr-row { display: grid; grid-template-columns: 1fr 128px; grid-template-rows: auto auto; column-gap: 12px; align-items: center; padding: 12px 0; margin: 0; border-bottom: 1px solid var(--line); cursor: text; font-weight: 400; }
+.pr-row:last-child { border-bottom: 0; }
+.pr-row .nm { font-size: 15px; line-height: 1.3; min-width: 0; overflow-wrap: anywhere; }
+.pr-row .nm small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.pr-row .pin { position: relative; display: block; }
+.pr-row .pin i { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-style: normal; color: var(--muted); font-size: 14px; pointer-events: none; }
+.pr-row .pin input { padding-left: 38px; text-align: right; margin: 0; width: 100%; }
+.pr-row .st { grid-column: 2; justify-self: end; font-size: 12px; font-weight: 500; color: var(--green); display: inline-flex; align-items: center; gap: 4px; min-height: 0; }
+.pr-row .st:empty { display: none; }
+.pr-row .st svg { width: 14px; height: 14px; }
+.pr-row.bad .st { color: var(--red); }
+.pr-row.bad input { border-color: var(--red); }

@@ -599,10 +599,34 @@ try {
     await op.waitForFunction(() => window.scrollY === 0);
   });
 
+  await step('preços: preencher de uma vez, salva na hora e sincroniza', async () => {
+    await nav(op, '#historico');
+    await op.click('.fill-prices');
+    await waitHash(op, '#precos');
+    const n0 = Number(await op.textContent('#pf-n'));
+    assert.ok(n0 >= 1, 'deveria haver produtos sem preço');
+    const rows = op.locator('.pr-row');
+    const first = await rows.nth(0).getAttribute('data-id');
+    await rows.nth(0).locator('input').fill('3,2');
+    await rows.nth(0).locator('input').press('Enter');
+    await op.waitForFunction(() => /Salvo/.test(document.querySelector('.pr-row .st')?.textContent || ''));
+    assert.equal(await op.evaluate(() => document.activeElement === document.querySelectorAll('.pr-row input')[1]), true, 'Enter passa para o próximo');
+    assert.equal(await rows.nth(0).locator('input').inputValue(), '3,20');
+    assert.equal(await op.textContent('#pf-n'), String(n0 - 1));
+    await rows.nth(1).locator('input').fill('abc');
+    await rows.nth(1).locator('input').press('Tab');
+    await op.waitForSelector('.pr-row.bad');
+    await rows.nth(1).locator('input').fill('');
+    await rows.nth(1).locator('input').press('Tab');
+    await synced(op);
+    assert.equal(Number(fake.tables.produtos.find(p => p.id === first).preco), 3.2);
+    await shot(op, '19-precos');
+  });
+
   await step('revisão visual: todas as telas no tamanho do iPhone (390x844)', async () => {
     mkdirSync(path.join(SHOTS, 'qa'), { recursive: true });
     const id = fake.tables.produtos.find(p => p.nome === 'Álcool 70% 1L').id;
-    const screens = [['dono', op, ['#painel', '#estoque', '#estoque/alerta', '#produto/' + id, '#editar/' + id, '#novo', '#conferencia', '#historico', '#ajustes']],
+    const screens = [['dono', op, ['#painel', '#estoque', '#estoque/alerta', '#produto/' + id, '#editar/' + id, '#novo', '#conferencia', '#historico', '#precos', '#ajustes']],
       ['func', page, ['#painel', '#estoque', '#conferencia', '#ajustes']]];
     for (const [who, pg, routes] of screens) {
       await pg.setViewportSize({ width: 390, height: 844 });

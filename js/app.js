@@ -10,7 +10,7 @@ import { consumption, forecastDays, suggestLevels, rateText, forecastText, withQ
   expiriesByMonth, stockValue, monthSummary, monthKey, brl, orderText, whatsappUrl } from './insights.js';
 import { scanBarcode } from './scanner.js';
 
-export const APP_VERSION = '0.7.0';
+export const APP_VERSION = '0.7.1';
 export { isLow };
 
 // ---------- utilidades ----------
@@ -196,7 +196,7 @@ function renderChrome(r) {
     ...(isOwner() ? [['historico', I.calendar, 'Relatórios']] : []),
     ['ajustes', I.gear, 'Ajustes'],
   ];
-  const active = k => r.name === k || (k === 'estoque' && ['produto', 'novo', 'editar'].includes(r.name));
+  const active = k => r.name === k || (k === 'estoque' && ['produto', 'novo', 'editar'].includes(r.name)) || (k === 'historico' && r.name === 'precos');
   tabs.innerHTML = items.map(([k, ico, label, badge]) =>
     `<a href="#${k}" class="${active(k) ? 'on' : ''} ${lk && k !== 'conferencia' ? 'disabled' : ''}" data-tab="${k}"
       ${active(k) ? 'aria-current="page"' : ''}>${ico}${label}${badge ? `<span class="dot">${badge}</span>` : ''}</a>`).join('');
@@ -234,6 +234,7 @@ async function doRender() {
     case 'estoque': return viewList(r.arg);
     case 'conferencia': return viewCount();
     case 'historico': return isOwner() ? viewHistory() : viewDashboard();
+    case 'precos': return isOwner() ? viewPrices() : viewDashboard();
     case 'ajustes': return viewSettings();
     default: return viewDashboard();
   }
@@ -1125,11 +1126,12 @@ async function viewHistory() {
       <b>${cap(monthName(month))}</b>
       <button type="button" class="secondary icon-btn" id="m-next" aria-label="Próximo mês" ${month >= thisMonth ? 'disabled' : ''}>›</button></div>
     <div class="kpi-grid">
-      <div class="kcard"><span>${I.money}Valor em estoque hoje</span><b>${brl(sv.value)}</b><small>${sv.missing ? `${plural(sv.missing, 'produto', 'produtos')} sem preço` : 'Todos os produtos com preço'}</small></div>
+      <div class="kcard"><span>${I.money}Valor em estoque hoje</span><b>${brl(sv.value)}</b><small>${sv.missing ? `${plural(sv.missing, 'produto', 'produtos')} sem preço` : '<a href="#precos" id="go-prices">Todos com preço · revisar</a>'}</small></div>
       <div class="kcard"><span>${I.cart}Gasto no mês</span><b>${brl(ms.spend)}</b><small>Entradas de mercadoria</small></div>
       <div class="kcard ${ms.losses ? 'bad' : ''}"><span>${I.trash}Perdas (vencidos)</span><b>${brl(ms.losses)}</b><small>${plural(ms.lossUnits, 'unidade descartada', 'unidades descartadas')}</small></div>
       <div class="kcard ${cNao ? 'bad' : ''}"><span>${I.check}Conferências</span><b>${cFeitas} de ${mrows.length}</b><small>dias úteis${cJust ? ` · ${cJust} justificado${cJust > 1 ? 's' : ''}` : ''}${cNao ? ` · ${cNao} sem justificativa` : ''}</small></div>
     </div>
+    ${sv.missing ? `<a class="btn secondary block fill-prices" href="#precos" id="fill-prices">${I.money}Preencher preços (${sv.missing} faltando)</a>` : ''}
     ${ms.bySupplier.length ? `<h3>Gasto por fornecedor</h3><div class="card bars">${ms.bySupplier.map(x => `<div class="br"><div class="t"><span>${esc(x.supplier)}</span><b>${brl(x.value)}</b></div>
       <div class="b"><i style="width:${ms.spend ? Math.max(3, Math.round(100 * x.value / ms.spend)) : 0}%"></i></div><small>${plural(x.units, 'unidade', 'unidades')}</small></div>`).join('')}</div>` : ''}
     ${ms.usage.length ? `<h3>Mais usados no mês</h3><div class="card bars">${ms.usage.slice(0, 10).map(u => `<div class="br"><div class="t"><span>${esc(u.name)}</span><b>${u.units} un</b></div>
@@ -1185,6 +1187,56 @@ async function viewHistory() {
 }
 
 // ---------- tela: ajustes ----------
+// ---------- tela: preencher preços de uma vez (dono) ----------
+let pricesOnlyMissing = null;
+async function viewPrices() {
+  const missing = S.products.filter(p => p.price == null);
+  if (pricesOnlyMissing === null) pricesOnlyMissing = missing.length > 0;
+  const shown = S.products.filter(p => !pricesOnlyMissing || p.price == null);
+  const groups = [...new Set(shown.map(p => p.supplier || 'Sem fornecedor'))].sort((a, b) => a.localeCompare(b, 'pt-BR'))
+    .map(g => [g, shown.filter(p => (p.supplier || 'Sem fornecedor') === g).sort(byName)]);
+  const fmt = v => v == null ? '' : Number(v).toFixed(2).replace('.', ',');
+  main().innerHTML = `
+    <a href="#historico" class="back">${I.back}Relatórios</a>
+    <div class="eyebrow">Custo do estoque</div>
+    <h2>Preços dos produtos</h2>
+    <div class="card price-sum" id="psum"></div>
+    <div class="chips" id="pf"><button type="button" class="chip ${pricesOnlyMissing ? 'on' : ''}" data-m="1">Sem preço<span class="c" id="pf-n">${missing.length}</span></button>
+      <button type="button" class="chip ${!pricesOnlyMissing ? 'on' : ''}" data-m="0">Todos<span class="c">${S.products.length}</span></button></div>
+    <p class="small muted">Digite o preço de uma unidade e passe para o próximo. Cada preço é salvo na hora.</p>
+    ${!shown.length ? `<div class="card empty">${I.ok}<p>Todos os produtos já têm preço.</p></div>` : ''}
+    ${groups.map(([g, ps]) => `<h3>${esc(g)}</h3><div class="card price-list">${ps.map(p => `
+      <label class="pr-row" data-id="${p.id}"><span class="nm">${esc(p.name)}<small>${p.quantity} em estoque</small></span>
+        <span class="pin"><i>R$</i><input type="text" inputmode="decimal" enterkeyhint="next" autocomplete="off" placeholder="0,00" value="${fmt(p.price)}" aria-label="Preço de ${esc(p.name)}"></span>
+        <b class="st" aria-live="polite"></b></label>`).join('')}</div>`).join('')}`;
+  const sum = () => {
+    const sv = stockValue(S.products), n = S.products.length - sv.missing;
+    $('#psum').innerHTML = `<div><span>Com preço</span><b>${n} de ${S.products.length}</b></div><div><span>Valor em estoque</span><b>${brl(sv.value)}</b></div>`;
+    $('#pf-n').textContent = sv.missing;
+  };
+  sum();
+  $$('#pf .chip').forEach(b => b.onclick = () => { pricesOnlyMissing = b.dataset.m === '1'; render(); });
+  const inputs = $$('.pr-row input');
+  inputs.forEach((inp, i) => {
+    const row = inp.closest('.pr-row'), st = $('.st', row), id = row.dataset.id;
+    const save = async () => {
+      const t = inp.value.trim();
+      const price = t ? parsePrice(t) : null;
+      row.classList.toggle('bad', !!t && price == null);
+      if (t && price == null) { st.textContent = 'Inválido'; return; }
+      const cur = await db.get('products', id);
+      if (!cur || (cur.price ?? null) === price) { st.textContent = ''; return; }
+      const next = touch({ ...cur, price });
+      await db.put('products', next);
+      const k = S.products.findIndex(x => x.id === id); if (k >= 0) S.products[k] = next;
+      inp.value = fmt(price); st.innerHTML = `${I.ok}<span>Salvo</span>`;
+      sum(); cloud.syncSoon();
+    };
+    inp.addEventListener('change', save);
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save(); if (inputs[i + 1]) inputs[i + 1].focus(); else inp.blur(); } });
+  });
+}
+
 async function viewSettings() {
   main().innerHTML = `
     <div class="eyebrow">Ajustes</div>
