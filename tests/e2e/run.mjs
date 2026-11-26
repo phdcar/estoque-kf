@@ -481,10 +481,8 @@ try {
     assert.deepEqual(await op.$$eval('#alist li.prod .name', els => els.map(e => e.textContent)), ['Agulha 31G']);
     assert.equal(await op.locator('#alist li.prod .ping').count(), 1);
     assert.match(await op.textContent('#shop'), /Mercado Livre.*Agulha 31G.*comprar 2/s);
-    await op.waitForFunction(() => { const p = document.querySelector('.ring .prog'); return p && Number(p.getAttribute('stroke-dashoffset')) < 527 && /\d/.test(document.querySelector('.ring .ctr b').textContent); });
-    assert.match(await op.textContent('.contrib'), /Estoque acima do alerta.*Validade em dia.*Conferência diária.*Cadastro completo/s);
-    await op.waitForTimeout(1600);
-    await op.screenshot({ path: path.join(SHOTS, '11-painel-saude.png'), fullPage: true });
+    await op.waitForFunction(() => document.querySelectorAll('.radar .blip').length >= 1);
+    await shot(op, '11-painel-radar');
     await nav(op, '#estoque/alerta');
     assert.deepEqual(await op.$$eval('#plist li.prod .name', els => els.map(e => e.textContent)), ['Agulha 31G']);
     await shot(op, '12-estoque-filtro-alerta');

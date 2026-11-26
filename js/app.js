@@ -1,13 +1,13 @@
 import { db } from './db.js';
 import { processPhoto } from './lineart.js';
 import { ymd, countStatus, history, isWeekday } from './schedule.js';
-import { level, isLow, missing, need, shoppingList, shoppingText, summary, health, buy, sentenceCase, expiryLevel, expiryText, daysToExpiry, EXPIRY_SOON, NO_EXPIRY } from './stock.js';
+import { level, isLow, missing, need, shoppingList, shoppingText, summary, buy, sentenceCase, expiryLevel, expiryText, daysToExpiry, EXPIRY_SOON, NO_EXPIRY } from './stock.js';
 import { illustrationFor, SKETCH_FILTER } from './illustrations.js';
 import { I } from './icons.js';
 import * as cloud from './cloud.js';
 import { startAmbient, skyState, PERIOD_NAME, tapURI } from './ambient.js';
 
-export const APP_VERSION = '0.6.0';
+export const APP_VERSION = '0.6.1';
 export { isLow };
 
 // ---------- utilidades ----------
@@ -395,68 +395,22 @@ function bindQty(list) {
 }
 
 // radar desenhado: cada ponto é um produto em alerta ou no limite
-const partWord = v => v == null ? 'Sem dados' : v >= 0.85 ? 'Ótimo' : v >= 0.7 ? 'Bom' : v >= 0.5 ? 'Atenção' : 'Crítico';
-const RING_C = 2 * Math.PI * 84;
-function ringSvg(score) {
-  const ticks = Array.from({ length: 60 }, (_, i) => {
-    const a = (i / 60) * 2 * Math.PI, r1 = 98, r2 = i % 5 ? 95 : 92;
-    return `<line x1="${(100 + r1 * Math.sin(a)).toFixed(1)}" y1="${(100 - r1 * Math.cos(a)).toFixed(1)}" x2="${(100 + r2 * Math.sin(a)).toFixed(1)}" y2="${(100 - r2 * Math.cos(a)).toFixed(1)}"/>`;
+function radarSvg(products) {
+  const hash = s => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+  const blips = products.filter(p => ['esgotado', 'critico', 'atencao'].includes(level(p))).map(p => {
+    const a = (hash(p.id) % 360) * Math.PI / 180;
+    const r = 30 + 38 * Math.min(1, p.quantity / (p.min * 1.5 || 1));
+    const red = isLow(p);
+    return `<circle class="blip" style="animation-delay:${((hash(p.id) % 360) / 360 * 4).toFixed(2)}s" cx="${(75 + r * Math.cos(a)).toFixed(1)}" cy="${(75 + r * Math.sin(a)).toFixed(1)}" r="${red ? 4 : 3}" fill="${red ? '#F2A49C' : '#EBCB8B'}"/>`;
   }).join('');
-  const low = score != null && score < 50;
-  return `<svg viewBox="0 0 200 200" aria-hidden="true">
-    <defs><linearGradient id="rg" x1="0" y1="1" x2="1" y2="0">
-      <stop offset="0" stop-color="${low ? '#B8574E' : '#9A7A44'}"/><stop offset=".55" stop-color="${low ? '#E0796F' : '#CDB27E'}"/><stop offset="1" stop-color="${low ? '#F6C1BA' : '#F3E6C4'}"/></linearGradient></defs>
-    <g class="ticks">${ticks}</g>
-    <circle class="track" cx="100" cy="100" r="84"/>
-    <circle class="prog" cx="100" cy="100" r="84" stroke="url(#rg)" stroke-dasharray="${RING_C.toFixed(2)}" stroke-dashoffset="${RING_C.toFixed(2)}" data-to="${(RING_C * (1 - (score || 0) / 100)).toFixed(2)}"/>
+  return `<svg viewBox="0 0 150 150" aria-hidden="true">
+    <defs><linearGradient id="sw" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#CDB27E" stop-opacity="0"/><stop offset="1" stop-color="#CDB27E" stop-opacity=".45"/></linearGradient></defs>
+    <circle cx="75" cy="75" r="72" fill="#0E1520" stroke="rgba(205,178,126,.45)"/>
+    ${[54, 36, 18].map(r => `<circle cx="75" cy="75" r="${r}" fill="none" stroke="rgba(243,239,231,.10)"/>`).join('')}
+    <path d="M75 3v144M3 75h144" stroke="rgba(243,239,231,.07)"/>
+    <g class="sweep"><path d="M75 75L75 3A72 72 0 0 1 133.2 32.6z" fill="url(#sw)"/><path d="M75 75L133.2 32.6" stroke="#CDB27E" stroke-width="1.2"/></g>
+    ${blips}
   </svg>`;
-}
-
-// conferência dos últimos 10 dias úteis (feita = 1, justificada = meio, não feita = 0); hoje não entra
-function countRate() {
-  const rows = history({ now: now(), start: S.schedule?.startDate || ymd(now()), deadline: S.schedule?.deadline || '18:00', counts: S.counts,
-    productDays: S.products.map(p => ymd(new Date(p.createdAt))), limit: 11 })
-    .filter(r => r.day !== ymd(now()) && r.state !== 'sem-cobranca').slice(0, 10);
-  if (!rows.length) return { rate: null, done: 0, total: 0 };
-  const done = rows.filter(r => r.state === 'feita').length, just = rows.filter(r => r.state === 'justificada').length;
-  return { rate: (done + just * 0.5) / rows.length, done, total: rows.length };
-}
-
-function insight(sm, alerts, exp) {
-  const first = alerts[0];
-  if (sm.esgotado) return `${plural(sm.esgotado, 'produto esgotado', 'produtos esgotados')}. Comece a reposição por <b>${esc(first.name)}</b>.`;
-  if (alerts.length) return `${plural(alerts.length, 'produto está', 'produtos estão')} abaixo do alerta. O mais urgente é <b>${esc(first.name)}</b>.`;
-  if (sm.vencido) return `${plural(sm.vencido, 'produto vencido', 'produtos vencidos')} na prateleira. Retire e reponha.`;
-  if (exp.length) return `<b>${esc(exp[0].name)}</b> vence em breve. Use esse lote primeiro.`;
-  if (sm.incompleto) return `Estoque em dia. Complete o cadastro de ${plural(sm.incompleto, 'produto', 'produtos')} para a nota ficar exata.`;
-  return 'Tudo em dia. Estoque, validade e conferência sob controle.';
-}
-
-// anima o anel, os números e as barras quando a tela abre
-function animateDashboard(enter) {
-  const ease = t => 1 - Math.pow(1 - t, 3);
-  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const prog = $('.ring .prog');
-  const nums = $$('[data-count]');
-  const bars = $$('.contrib .b i');
-  if (!enter || reduce) {
-    if (prog) { prog.style.transition = 'none'; prog.setAttribute('stroke-dashoffset', prog.dataset.to); }
-    nums.forEach(n => { n.textContent = n.dataset.count; });
-    bars.forEach(b => { b.style.transition = 'none'; b.style.width = b.dataset.w; });
-    return;
-  }
-  nums.forEach(n => { n.textContent = '0'; });
-  requestAnimationFrame(() => requestAnimationFrame(() => {
-    if (prog) prog.setAttribute('stroke-dashoffset', prog.dataset.to);
-    bars.forEach((b, i) => { b.style.transitionDelay = `${0.35 + i * 0.08}s`; b.style.width = b.dataset.w; });
-    const t0 = performance.now(), dur = 1300;
-    const tick = t => {
-      const k = ease(Math.min(1, (t - t0) / dur));
-      nums.forEach(n => { n.textContent = Math.round(Number(n.dataset.count) * k); });
-      if (k < 1) requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  }));
 }
 
 // ---------- tela: painel (radar) ----------
@@ -467,8 +421,6 @@ async function viewDashboard() {
   const atn = S.products.filter(p => level(p) === 'atencao').sort(byName);
   const inc = S.products.filter(p => missing(p).length).sort(byName);
   const list = shoppingList(S.products);
-  const cr = countRate();
-  const hl = health(S.products, now(), cr.rate);
   const h = now().getHours();
   const hello = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
   const today = now().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -481,29 +433,20 @@ async function viewDashboard() {
       <div class="orn" aria-hidden="true"><i></i><b></b><i></i></div>
     </div>
     ${countBanner()}
-    <section class="score-card" aria-label="Saúde do estoque">
+    <section class="radar-card" aria-label="Radar de estoque">
       <div class="face-tap" aria-hidden="true"><div class="shB"><div class="shP"></div></div></div>
-      <div class="ring ${hl.score != null && hl.score < 50 ? 'low' : ''}">${ringSvg(hl.score)}
-        <div class="ctr"><span class="lbl">Saúde do estoque</span><b ${hl.score != null ? `data-count="${hl.score}"` : ''}>${hl.score ?? '–'}</b><span class="word">${hl.word}</span></div></div>
-      <p class="insight">${insight(sm, alerts, exp)}</p>
-      <div class="contrib">
-        ${[
-          ['Estoque acima do alerta', hl.parts.estoque, `${sm.total - sm.alerta - sm.semMinimo} de ${sm.total - sm.semMinimo}`],
-          ['Validade em dia', hl.parts.validade, hl.parts.validade == null ? 'informe as validades' : `${sm.vencido} ${sm.vencido === 1 ? 'vencido' : 'vencidos'} · ${sm.venceLogo} a vencer`],
-          ['Conferência diária', hl.parts.conferencia, cr.total ? `${cr.done} de ${cr.total} dias úteis` : 'ainda sem dias'],
-          ['Cadastro completo', hl.parts.cadastro, `${sm.total - sm.incompleto} de ${sm.total}`],
-        ].map(([t, v, d]) => `<div class="c ${v == null ? 'na' : v < 0.5 ? 'bad' : v < 0.7 ? 'mid' : ''}"><div class="t"><span>${t}</span><em>${partWord(v)}</em></div>
-          <div class="b"><i data-w="${v == null ? 0 : Math.max(2, Math.round(v * 100))}%"></i></div><small>${d}</small></div>`).join('')}
+      <div class="radar ${sm.alerta ? 'alert' : ''}">${radarSvg(S.products)}
+        <div class="ctr"><b id="radar-n">${sm.alerta}</b><span>Em alerta</span></div></div>
+      <div class="kpis">
+        <a class="kpi red" href="#estoque/alerta"><span><i style="background:#F2A49C"></i>Abaixo do mínimo</span><b>${sm.alerta}</b></a>
+        <a class="kpi red" href="#estoque/alerta"><span><i style="background:#E0796F"></i>Esgotados (zerados)</span><b>${sm.esgotado}</b></a>
+        <a class="kpi amber" href="#estoque/atencao"><span><i style="background:#EBCB8B"></i>No limite</span><b>${sm.atencao}</b></a>
+        <a class="kpi green" href="#estoque/ok"><span><i style="background:#9ED2B5"></i>Em dia</span><b>${sm.ok}</b></a>
+        <a class="kpi ${sm.vencido ? 'red' : 'gray'}" href="#estoque/validade"><span><i style="background:#C99A92"></i>Vencidos</span><b>${sm.vencido}</b></a>
+        <a class="kpi amber" href="#estoque/validade"><span><i style="background:#E8C27A"></i>Vencem em ${EXPIRY_SOON} dias</span><b>${sm.venceLogo}</b></a>
+        <a class="kpi gray" href="#estoque/incompleto"><span><i style="background:#9A9284"></i>Cadastro incompleto</span><b>${sm.incompleto}</b></a>
       </div>
     </section>
-    <div class="tiles">
-      <a class="tile red" href="#estoque/alerta"><b id="radar-n" data-count="${sm.alerta}">${sm.alerta}</b><span>Abaixo do mínimo</span></a>
-      <a class="tile red" href="#estoque/alerta"><b data-count="${sm.esgotado}">${sm.esgotado}</b><span>Esgotados</span></a>
-      <a class="tile amber" href="#estoque/atencao"><b data-count="${sm.atencao}">${sm.atencao}</b><span>No limite</span></a>
-      <a class="tile green" href="#estoque/ok"><b data-count="${sm.ok}">${sm.ok}</b><span>Em dia</span></a>
-      <a class="tile ${sm.vencido ? 'red' : 'gray'}" href="#estoque/validade"><b data-count="${sm.vencido}">${sm.vencido}</b><span>Vencidos</span></a>
-      <a class="tile amber" href="#estoque/validade"><b data-count="${sm.venceLogo}">${sm.venceLogo}</b><span>Vencem em ${EXPIRY_SOON} dias</span></a>
-    </div>
 
     <h3>Radar · abaixo do mínimo (${alerts.length})</h3>
     ${alerts.length ? `<ul class="list" id="alist">${alerts.map(prodRow).join('')}</ul>`
@@ -534,7 +477,6 @@ async function viewDashboard() {
     </div>` : ''}
     <p class="foot">Clínica KF · Estoque ${APP_VERSION}</p>`;
   for (const l of [$('#alist'), $('#wlist'), $('#elist')]) if (l) bindQty(l);
-  animateDashboard(main().classList.contains('enter'));
   const sh = $('#share');
   if (sh) sh.onclick = async () => {
     const text = shoppingText(list, now());
