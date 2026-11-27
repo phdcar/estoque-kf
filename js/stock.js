@@ -144,3 +144,27 @@ export function sentenceCase(s) {
   return out.charAt(0).toUpperCase() + out.slice(1);
 }
 
+
+// ---------- busca (versão 0.8.1) ----------
+// Sem acento e sem diferença de maiúsculas; cada palavra digitada precisa aparecer (início de palavra ou no meio).
+// Ordem: nome começa com o texto > alguma palavra do nome começa com ele > aparece no nome > fornecedor, categoria ou código.
+export const fold = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+export function searchProducts(products, term, limit = Infinity) {
+  const q = fold(term).replace(/\s+/g, ' ');
+  if (!q) return [];
+  const tokens = q.split(' ');
+  const out = [];
+  for (const p of products) {
+    const name = fold(p.name), extra = fold(`${p.supplier || ''} ${p.category || ''} ${p.barcode || ''}`);
+    const all = `${name} ${extra}`;
+    if (!tokens.every(t => all.includes(t))) continue;
+    const words = name.split(/[\s\-–/().,]+/);
+    let score;
+    if (name.startsWith(q)) score = 0;
+    else if (tokens.every(t => words.some(w => w.startsWith(t)))) score = 1;
+    else if (tokens.every(t => name.includes(t))) score = 2;
+    else score = 3;
+    out.push({ p, score });
+  }
+  return out.sort((a, b) => a.score - b.score || a.p.name.localeCompare(b.p.name, 'pt-BR')).slice(0, limit).map(x => x.p);
+}

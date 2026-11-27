@@ -1,7 +1,7 @@
 import { db } from './db.js';
 import { processPhoto } from './lineart.js';
 import { ymd, countStatus, history, isWeekday, sinceLastCount } from './schedule.js';
-import { level, isLow, missing, need, shoppingList, shoppingText, itemNote, FORECAST_HORIZON, ORDER_COVER, summary, buy, sentenceCase, expiryLevel, expiryText, daysToExpiry, EXPIRY_SOON, NO_EXPIRY } from './stock.js';
+import { level, isLow, missing, need, shoppingList, shoppingText, itemNote, FORECAST_HORIZON, ORDER_COVER, summary, buy, sentenceCase, searchProducts, fold, expiryLevel, expiryText, daysToExpiry, EXPIRY_SOON, NO_EXPIRY } from './stock.js';
 import { illustrationFor, SKETCH_FILTER } from './illustrations.js';
 import { I } from './icons.js';
 import * as cloud from './cloud.js';
@@ -10,7 +10,7 @@ import { consumption, forecastDays, suggestLevels, rateText, forecastText, withQ
   expiriesByMonth, stockValue, monthSummary, monthKey, brl, orderText, whatsappUrl, priceHistory, priceTrend, priceBySupplier, pctText, countPlan } from './insights.js';
 import { scanBarcode } from './scanner.js';
 
-export const APP_VERSION = '0.8.0';
+export const APP_VERSION = '0.8.1';
 export { isLow };
 
 // ---------- utilidades ----------
@@ -588,6 +588,46 @@ async function viewDashboard() {
 
 // ---------- tela: lista de produtos ----------
 let searchTerm = '';
+
+// ---------- prévia da busca (versão 0.8.1): ao digitar, mostra os produtos que podem ser ----------
+function markMatch(name, term) {
+  const f = fold(name), toks = fold(term).split(/\s+/).filter(Boolean);
+  if (f.length !== name.length || !toks.length) return esc(name);
+  const on = new Array(name.length).fill(false);
+  for (const t of toks) { const i = f.indexOf(t); if (i >= 0) for (let k = i; k < i + t.length; k++) on[k] = true; }
+  let out = '', open = false;
+  for (let i = 0; i < name.length; i++) {
+    if (on[i] && !open) { out += '<mark>'; open = true; }
+    if (!on[i] && open) { out += '</mark>'; open = false; }
+    out += esc(name[i]);
+  }
+  return out + (open ? '</mark>' : '');
+}
+function showSuggest(q) {
+  const box = $('#q-sug');
+  if (!box) return;
+  if (!fold(q.value) || document.activeElement !== q) { box.classList.add('hidden'); q.setAttribute('aria-expanded', 'false'); return; }
+  const all = searchProducts(S.products, q.value);
+  const hits = all.slice(0, 6);
+  box.innerHTML = hits.length ? hits.map((p, i) => `<a class="sg ${i === 0 ? 'first' : ''}" role="option" href="#produto/${p.id}" data-id="${p.id}">
+      <span class="n"><span class="t">${markMatch(p.name, q.value)}</span><small>${esc(p.supplier || 'Sem fornecedor')}</small></span>
+      <span class="q ${isLow(p) ? 'red' : ''}">${Number(p.quantity) === 0 ? 'esgotado' : `tem ${p.quantity}`}</span></a>`).join('')
+      + (all.length > hits.length ? `<div class="more">Mais ${all.length - hits.length} na lista abaixo</div>` : '')
+    : `<div class="more">Nenhum produto com “${esc(q.value.trim())}”</div>`;
+  box.classList.remove('hidden');
+  q.setAttribute('aria-expanded', 'true');
+}
+function bindSuggest(q) {
+  const box = $('#q-sug');
+  // o toque na sugestão abre o produto antes de o campo perder o foco
+  box.addEventListener('pointerdown', e => { const a = e.target.closest('a.sg'); if (a) { e.preventDefault(); go('#produto/' + a.dataset.id); } });
+  q.addEventListener('focus', () => showSuggest(q));
+  q.addEventListener('blur', () => setTimeout(() => showSuggest(q), 150));
+  q.addEventListener('keydown', e => {
+    if (e.key === 'Escape') q.blur();
+    if (e.key === 'Enter') { const a = $('#q-sug a.sg'); if (a) { e.preventDefault(); go('#produto/' + a.dataset.id); } }
+  });
+}
 let pendingBarcode = '';
 let category = '';
 const FILTERS = [['todos', 'Todos'], ['alerta', 'Abaixo do mínimo'], ['atencao', 'No limite'], ['ok', 'Em dia'], ['validade', 'Validade'], ['incompleto', 'Incompletos']];
@@ -607,8 +647,8 @@ async function viewList(filter = 'todos') {
     ${low.length ? `<div class="banner red" id="low-banner">${I.alert}<span>${low.length} ${low.length === 1 ? 'produto abaixo' : 'produtos abaixo'} do mínimo: ${low.map(p => esc(p.name)).join(', ')}</span></div>` : ''}
     <div class="eyebrow">Estoque</div>
     <h2>Produtos <span class="muted" style="font-family:var(--sans);font-size:16px">(${S.products.length})</span></h2>
-    ${S.products.length ? `<div class="search-row">${S.products.length > 5 ? `<div class="search">${I.search}<input type="search" id="q" placeholder="Nome ou fornecedor" value="${esc(searchTerm)}" aria-label="Buscar"></div>` : '<span></span>'}
-      <button type="button" class="secondary small-btn" id="l-scan">${I.scan}Ler código</button></div>` : ''}
+    ${S.products.length ? `<div class="search-row">${S.products.length > 1 ? `<div class="search" id="q-box">${I.search}<input type="search" id="q" placeholder="Nome ou fornecedor" value="${esc(searchTerm)}" aria-label="Buscar produto" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="q-sug"></div>` : '<span></span>'}
+      <button type="button" class="secondary small-btn" id="l-scan">${I.scan}Ler código</button><div class="suggest hidden" id="q-sug" role="listbox"></div></div>` : ''}
     ${S.products.length ? `<div class="chips" id="filters">${FILTERS.map(([k, t]) =>
       `<button type="button" class="chip ${k === filter ? 'on' : ''} ${k === 'alerta' ? 'red' : ''}" data-f="${k}">${t}<span class="c">${count(k)}</span></button>`).join('')}</div>` : ''}
     ${cats.length > 1 ? `<div class="chips" id="cats"><button type="button" class="chip ${!category ? 'on' : ''}" data-c="">Todas as categorias</button>${cats.map(c =>
@@ -618,11 +658,9 @@ async function viewList(filter = 'todos') {
     <ul class="list" id="plist">${items.map(prodRow).join('')}</ul>
     <a href="#novo" class="btn fab" id="add">${I.plus}Produto</a>`;
   const applySearch = () => {
-    const t = searchTerm.trim().toLowerCase();
-    $$('#plist li').forEach(li => {
-      const p = S.products.find(x => x.id === li.dataset.id);
-      li.classList.toggle('hidden', !!t && !(`${p.name} ${p.supplier || ''}`).toLowerCase().includes(t));
-    });
+    const hits = new Set(searchProducts(S.products, searchTerm).map(p => p.id));
+    const on = !!fold(searchTerm);
+    $$('#plist li').forEach(li => li.classList.toggle('hidden', on && !hits.has(li.dataset.id)));
   };
   const ls = $('#l-scan');
   if (ls) ls.onclick = async () => {
@@ -633,7 +671,7 @@ async function viewList(filter = 'todos') {
     if (confirm(`O código ${code} não está em nenhum produto. Cadastrar um produto novo com esse código?`)) { pendingBarcode = code; go('#novo'); }
   };
   const q = $('#q');
-  if (q) { q.oninput = () => { searchTerm = q.value; applySearch(); }; applySearch(); }
+  if (q) { q.oninput = () => { searchTerm = q.value; applySearch(); showSuggest(q); }; applySearch(); bindSuggest(q); }
   $$('#filters .chip').forEach(b => { b.onclick = () => go(b.dataset.f === 'todos' ? '#estoque' : '#estoque/' + b.dataset.f); });
   $$('#cats .chip').forEach(b => { b.onclick = () => { category = b.dataset.c; render(); }; });
   bindQty($('#plist'));

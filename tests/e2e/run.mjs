@@ -729,6 +729,33 @@ try {
     await op.screenshot({ path: path.join(SHOTS, 'qa', 'pedido-sugerido.png') });
   });
 
+  await step('busca: ao digitar mostra a prévia dos produtos (sem acento) e abre o produto', async () => {
+    await op.setViewportSize({ width: 390, height: 844 });
+    await nav(op, '#estoque');
+    await op.click('#q');
+    await op.type('#q', 'alc', { delay: 60 });
+    await op.waitForSelector('#q-sug:not(.hidden) a.sg');
+    const first = await op.textContent('#q-sug a.sg');
+    assert.match(first, /Álcool 70% 1L/);
+    assert.equal(await op.textContent('#q-sug a.sg mark'), 'Álc');
+    await op.waitForTimeout(300);
+    await op.screenshot({ path: path.join(SHOTS, 'qa', 'busca-previa.png') });
+    // lista abaixo também filtra
+    const visible = await op.$$eval('#plist li:not(.hidden) .name', els => els.map(e => e.textContent));
+    assert.deepEqual(visible, ['Álcool 70% 1L']);
+    // nada encontrado
+    await op.fill('#q', 'zzz'); await op.dispatchEvent('#q', 'input');
+    assert.match(await op.textContent('#q-sug'), /Nenhum produto com “zzz”/);
+    // tocar na sugestão abre o produto
+    await op.fill('#q', 'agu'); await op.dispatchEvent('#q', 'input');
+    await op.waitForSelector('#q-sug a.sg');
+    const id = await op.getAttribute('#q-sug a.sg', 'data-id');
+    await op.click('#q-sug a.sg');
+    await waitHash(op, '#produto/' + id);
+    await nav(op, '#estoque');
+    await op.fill('#q', ''); await op.dispatchEvent('#q', 'input');
+  });
+
   await step('dono tira o acesso do funcionário', async () => {
     await nav(op, '#ajustes');
     await op.waitForSelector('#members [data-rm]');

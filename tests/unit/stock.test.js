@@ -105,3 +105,25 @@ test('pedido sugerido usa a previsão de consumo (versão 0.8)', () => {
   // sem previsão, continua como antes
   assert.equal(shoppingList(ps).flatMap(g => g.items).length, 1);
 });
+
+test('busca com prévia: sem acento, parte do nome, melhores primeiro (versão 0.8.1)', async () => {
+  const { searchProducts } = await import('../../js/stock.js');
+  const ps = [
+    { id: 1, name: 'Álcool 70%', supplier: 'Dental Cremer', category: 'Insumos' },
+    { id: 2, name: 'Agulha 32G 6 mm', supplier: 'Mercado Livre', category: 'Insumos' },
+    { id: 3, name: 'Seringa 3 ml com luer lock e agulha 22G', supplier: 'Dental Cremer', category: 'Insumos' },
+    { id: 4, name: 'Anestésico xilestesin com vaso', supplier: 'Dental Cremer', category: 'Medicamentos' },
+    { id: 5, name: 'Cânula 22G com agulha 22G', supplier: 'Mercado Livre', category: 'Insumos' },
+  ];
+  const names = (t, n) => searchProducts(ps, t, n).map(p => p.id);
+  assert.deepEqual(names('alc'), [1]);                 // sem acento acha "Álcool"
+  assert.deepEqual(names('ANEST'), [4]);
+  assert.deepEqual(names('ag'), [2, 5, 3]);            // começa com > palavra começa com (ordem alfabética)
+  assert.deepEqual(names('agulha 22'), [5, 3]);        // várias palavras
+  assert.deepEqual(names('canula'), [5]);
+  assert.deepEqual(names('mercado'), [2, 5]);          // pelo fornecedor
+  assert.deepEqual(names('ulha'), [2, 5, 3]);          // no meio da palavra
+  assert.deepEqual(names('a', 2).length, 2);           // limite
+  assert.deepEqual(names('  '), []);
+  assert.deepEqual(names('xyz'), []);
+});
