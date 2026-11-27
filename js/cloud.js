@@ -7,7 +7,7 @@ import { CONFIG } from './config.js';
 
 let client = null;
 const listeners = new Set();
-export const state = { status: 'idle', pending: 0, lastOk: null, error: null };
+export const state = { status: 'idle', pending: 0, lastOk: null, error: null, sentOffline: 0 };
 
 function emit(changed = false) { listeners.forEach(fn => fn({ ...state }, changed)); }
 export function onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); }
@@ -152,6 +152,7 @@ export function requestSync() {
     } finally {
       running = null;
       emit(changed);
+      state.sentOffline = 0;
     }
     return changed;
   })();
@@ -189,7 +190,8 @@ async function syncOnce() {
     state.lastOk = new Date().toISOString();
   } catch (e) {
     console.warn('sync', e);
-    state.status = navigator.onLine ? 'error' : 'offline';
+    // celular diz que tem rede mas a internet não responde (Wi-Fi sem sinal): trata como sem internet
+    state.status = !navigator.onLine || /Failed to fetch|NetworkError|Load failed|network/i.test(e?.message || String(e)) ? 'offline' : 'error';
     state.error = msg(e);
   }
   state.pending = await countPending();
@@ -246,7 +248,7 @@ async function pushCounts() {
   if (!dirty.length) return;
   const { error } = await sb().from('conferencias').upsert(dirty.map(toRemoteCount), { onConflict: 'id', ignoreDuplicates: true });
   if (error) throw error;
-  for (const c of dirty) { delete c._dirty; await db.put('counts', c); }
+  for (const c of dirty) { if (c._offline) state.sentOffline++; delete c._dirty; delete c._offline; await db.put('counts', c); }
 }
 
 async function pushMoves() {
@@ -395,7 +397,36 @@ export async function pushSave(sub) {
   const { error } = await sb().from('kf_push_inscricoes').upsert({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth }, { onConflict: 'endpoint' });
   if (error) throw new Error(msg(error));
 }
+// dono: quantos celulares de cada pessoa estão com avisos ligados (Map user_id -> n)
+export async function pushSummary() {
+  const { data, error } = await sb().rpc('kf_push_resumo');
+  if (error) throw new Error(msg(error));
+  return new Map((data || []).map(r => [r.user_id, r.celulares]));
+}
 export async function pushTest(endpoint, badge) { return pushFn({ acao: 'teste', endpoint, badge }); }
+
+// ---------- contagem por foto (versão 0.9) ----------
+// envia a foto (JPEG) e a lista de produtos; volta { itens: [{ produto_id, quantidade, validade, lote, certeza, obs }], outros }
+export async function photoCount(jpeg, products) {
+  const { data: { session } } = await sb().auth.getSession();
+  if (!session) throw new Error('Entre na conta primeiro.');
+  const b64 = await new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result).split(',')[1]);
+    fr.onerror = () => reject(fr.error);
+    fr.readAsDataURL(jpeg);
+  });
+  let r;
+  try {
+    r = await fetch(`${CONFIG.url}/functions/v1/kf-foto`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', apikey: CONFIG.key, 'x-kf-token': session.access_token },
+      body: JSON.stringify({ imagem: b64, produtos: products.map(p => ({ id: p.id, nome: p.name, fornecedor: p.supplier || '' })) }),
+    });
+  } catch (e) { throw new Error(msg(e)); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.erro || `Erro ${r.status}`);
+  return j;
+}
 
 // ---------- relatório mensal em PDF (versão 0.7) ----------
 async function reportFn(body) {

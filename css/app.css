@@ -782,3 +782,19 @@ h3 .h-n { font-family: var(--sans); font-size: 14px; margin-left: 4px; }
 .bl-it .go { color: var(--gold-ink); font-weight: 500; flex: none; }
 .gold-hint { color: var(--gold-ink); }
 .bl-it, .bl-it:hover, .bl-it:active { background: none !important; box-shadow: none !important; color: inherit !important; }
+
+/* versão 0.9: cartão para ligar os avisos, texto verde nos Ajustes, contagem por foto */
+.push-card { border: 1px solid rgba(205,178,126,.35); }
+.push-card h4 { color: var(--gold-ink, #CDB27E); }
+.ok-ink { color: var(--green); }
+.ct-btns { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.photo-sheet { position: fixed; inset: 0; z-index: 30; background: rgba(8,12,18,.78); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  display: flex; align-items: flex-end; justify-content: center; }
+.ps-box { background: #141C27; border: 1px solid var(--hair, rgba(243,239,231,.1)); border-radius: 22px 22px 0 0; width: 100%; max-width: 560px;
+  max-height: 88vh; overflow-y: auto; padding: 22px 18px calc(22px + env(safe-area-inset-bottom)); }
+.ps-list li { display: flex; align-items: center; gap: 12px; }
+.ps-list li .info { flex: 1; min-width: 0; }
+.ps-list li .info small { display: block; margin-top: 4px; }
+.ps-list li input[type=number] { width: 76px; flex: none; text-align: center; }
+.ps-use input, .ps-exp input { width: 20px; height: 20px; accent-color: var(--gold, #CDB27E); }
+.ps-exp { display: flex; gap: 8px; align-items: center; margin-top: 6px; }

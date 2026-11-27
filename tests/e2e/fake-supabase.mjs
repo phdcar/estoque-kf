@@ -97,6 +97,23 @@ export class FakeSupabase {
     }
     if (path === '/auth/v1/logout') return json(204);
 
+    // ---------- Edge Function da contagem por foto (versão 0.9) ----------
+    if (path === '/functions/v1/kf-foto' && method === 'POST') {
+      const tok = req.headers()['x-kf-token'] || '';
+      const who = this.tokens.get(tok);
+      if (!who || !this.member(who)) return json(403, { erro: 'Entre na conta da clínica primeiro.' });
+      const b = body() || {};
+      this.fotoCalls = (this.fotoCalls || 0) + 1;
+      this.lastFoto = b;
+      if (!b.imagem || !/^\/9j\//.test(b.imagem)) return json(400, { erro: 'Foto ausente ou grande demais.' });
+      const byName = n => (b.produtos || []).find(p => p.nome.startsWith(n));
+      const itens = [];
+      const c = byName('Campo cirúrgico'), f = byName('Fio de sutura');
+      if (c) itens.push({ produto_id: c.id, quantidade: 12, validade: '2027-08-31', lote: 'L2611', certeza: 'alta', obs: '' });
+      if (f) itens.push({ produto_id: f.id, quantidade: 7, validade: '2027-03', lote: null, certeza: 'media', obs: '2 caixas atrás, contei pela lateral' });
+      return json(200, { itens, outros: ['Luvas de procedimento'] });
+    }
+
     const uid = this.uid(req);
 
     // ---------- RPC ----------
@@ -121,7 +138,11 @@ export class FakeSupabase {
         Object.assign(this.tables.config[0], { codigo_convite: c, servidor_em: this.stamp() });
         return json(200, c);
       }
-      if (fn === 'kf_remover_membro') {
+      if (fn === 'kf_push_resumo') {
+        if (this.member(uid)?.papel !== 'dono') return err('Só o dono pode fazer isso');
+        return json(200, this.tables.membros.map(m => ({ user_id: m.user_id, celulares: m.user_id === uid ? (this.ownerPhones || 0) : 0 })));
+      }
+            if (fn === 'kf_remover_membro') {
         if (this.member(uid)?.papel !== 'dono') return err('Só o dono pode fazer isso');
         this.tables.membros = this.tables.membros.filter(m => m.user_id !== b.p_user);
         return json(204);

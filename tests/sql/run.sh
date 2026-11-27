@@ -32,10 +32,14 @@ $P -d t -f "$DIR/../../supabase/migracao-0.8.3.sql" >/dev/null
 $P -d t -f "$DIR/../../supabase/migracao-0.8.3.sql" >/dev/null
 $P -d t -f "$DIR/../../supabase/migracao-0.8.4.sql" >/dev/null
 $P -d t -f "$DIR/../../supabase/migracao-0.8.4.sql" >/dev/null
+$P -d t -f "$DIR/../../supabase/migracao-0.9.sql" >/dev/null
+$P -d t -f "$DIR/../../supabase/migracao-0.9.sql" >/dev/null   # rodar 2x não pode dar erro
 OUT2=$($P -d t -t -A -f "$DIR/avisos_test.sql" 2>&1) || { echo "$OUT"; echo "$OUT2"; exit 1; }
 OUT3=$($P -d t -t -A -f "$DIR/v08_test.sql" 2>&1) || { echo "$OUT"; echo "$OUT2"; echo "$OUT3"; exit 1; }
+OUT4=$($P -d t -t -A -f "$DIR/v09_test.sql" 2>&1) || { echo "$OUT4"; exit 1; }
 OUT2="$OUT2
-$OUT3"
+$OUT3
+$OUT4"
 OUT="$OUT
 $OUT2"
 if echo "$OUT" | grep -qx f; then echo "$OUT"; echo "FALHOU: alguma verificação deu falso"; exit 1; fi

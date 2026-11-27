@@ -185,3 +185,18 @@ export async function processPhoto(file) {
   c1.width = c1.height = c2.width = c2.height = 0; // libera memória (importante no iPhone)
   return { original, lineart };
 }
+
+// versão 0.9: foto da prateleira para a contagem por foto (JPEG, lado maior até 1800 px, orientação respeitada)
+export async function shelfJpeg(file, max = 1800) {
+  const img = await loadImage(file);
+  const o = fit(img.naturalWidth, img.naturalHeight, max);
+  const c = document.createElement('canvas');
+  c.width = o.w; c.height = o.h;
+  const x = c.getContext('2d');
+  x.fillStyle = '#fff';
+  x.fillRect(0, 0, o.w, o.h);
+  x.drawImage(img, 0, 0, o.w, o.h);
+  const blob = await toBlob(c, 'image/jpeg', 0.85);
+  c.width = c.height = 0;
+  return blob;
+}

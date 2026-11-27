@@ -1,5 +1,5 @@
 import { db } from './db.js';
-import { processPhoto } from './lineart.js';
+import { processPhoto, shelfJpeg } from './lineart.js';
 import { ymd, countStatus, history, isCountWeekday, sinceLastCount } from './schedule.js';
 import { level, isLow, missing, need, shoppingList, shoppingText, itemNote, FORECAST_HORIZON, ORDER_COVER, summary, buy, sentenceCase, searchProducts, fold, expiryLevel, expiryText, daysToExpiry, EXPIRY_SOON, NO_EXPIRY } from './stock.js';
 import { illustrationFor, SKETCH_FILTER } from './illustrations.js';
@@ -12,7 +12,7 @@ import { scanBarcode } from './scanner.js';
 import { lookupBarcode, isRetailCode } from './barcode-lookup.js';
 import { installSwipe } from './swipe.js';
 
-export const APP_VERSION = '0.8.6';
+export const APP_VERSION = '0.9.0';
 export { isLow };
 
 // ---------- utilidades ----------
@@ -131,6 +131,49 @@ function ensurePush() {
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted' || !('PushManager' in window) || !('serviceWorker' in navigator)) return;
     pushSubscribe().catch(() => { pushChecked = false; });
   } catch { /* sem suporte */ }
+}
+// liga as notificações neste celular (usado no cartão do painel e em Ajustes); escreve o andamento em el
+async function activatePush(el) {
+  const say = t => { if (el) el.textContent = t; };
+  const r = await Notification.requestPermission();
+  if (r !== 'granted') { say('Permissão negada. Para ativar depois, libere as notificações do app nos ajustes do celular.'); return false; }
+  updateBadge();
+  if ('PushManager' in window) {
+    say('Ativando…');
+    const sub = await pushSubscribe();
+    await cloud.pushTest(sub.endpoint, badgeCount());
+    say('Ativado neste celular. Enviei uma notificação de teste.');
+  } else say('Número no ícone ativado neste celular.');
+  return true;
+}
+// versão 0.9: cartão no painel para ninguém esquecer de ligar os avisos (some depois de ligar; "Agora não" esconde por 7 dias)
+const PUSH_LATER = 'kf-avisos-depois';
+function pushCard() {
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') return '';
+  try { if (Number(localStorage.getItem(PUSH_LATER) || 0) > Date.now()) return ''; } catch { /* ignore */ }
+  const ios = /iPhone|iPad/.test(navigator.userAgent);
+  const what = isOwner() ? 'o resumo e o aviso de conferência atrasada na segunda-feira' : 'o lembrete da conferência de segunda-feira';
+  let body, btn = '';
+  if (ios && !standalone()) body = `No iPhone, os avisos só funcionam com o app na Tela de Início. Toque em <b>Compartilhar</b> (o quadrado com a seta) e em <b>Adicionar à Tela de Início</b>. Depois abra o app pelo ícone novo e toque em <b>Ativar avisos</b>.`;
+  else if (typeof Notification === 'undefined' || !('PushManager' in window || 'setAppBadge' in navigator)) return '';
+  else if (Notification.permission === 'denied') body = 'Os avisos deste app estão bloqueados no celular. Libere em Ajustes do celular → Notificações → Estoque KF.';
+  else { body = `Receba neste celular ${what}.`; btn = `<button class="block" id="pc-on">Ativar avisos</button>`; }
+  return `<div class="card push-card" id="push-card">
+      <h4>Ative os avisos neste celular</h4>
+      <p class="small" id="pc-st" style="margin:0 0 12px">${body}</p>
+      ${btn}<button class="block secondary" id="pc-later" style="margin-top:8px">Agora não</button>
+    </div>`;
+}
+function bindPushCard() {
+  const on = $('#pc-on'), later = $('#pc-later');
+  if (later) later.onclick = () => { try { localStorage.setItem(PUSH_LATER, String(Date.now() + 7 * 864e5)); } catch { /* ignore */ } $('#push-card')?.remove(); };
+  if (on) on.onclick = async () => {
+    on.disabled = true;
+    try {
+      if (await activatePush($('#pc-st'))) { on.remove(); later?.remove(); setTimeout(() => $('#push-card')?.remove(), 4000); }
+      else on.disabled = false;
+    } catch (e) { $('#pc-st').textContent = 'Não foi possível ativar: ' + (e?.message || e); on.disabled = false; }
+  };
 }
 const badgeCount = () => S.products.filter(p => isLow(p) || expiryLevel(p, now()) === 'vencido').length;
 function updateBadge() {
@@ -546,6 +589,7 @@ async function viewDashboard() {
       <div class="orn" aria-hidden="true"><i></i><b></b><i></i></div>
     </div>
     ${countBanner()}
+    ${pushCard()}
     <section class="radar-card" aria-label="Radar de estoque">
       <div class="face-tap" aria-hidden="true"><div class="shB"><div class="shP"></div></div></div>
       ${sinceStrip()}
@@ -603,6 +647,7 @@ async function viewDashboard() {
     </div>` : ''}
     <p class="foot">Clínica KF · Estoque ${APP_VERSION}</p>`;
   for (const l of [$('#alist'), $('#wlist'), $('#elist')]) if (l) bindQty(l);
+  bindPushCard();
   $$('[data-order]').forEach(b => b.onclick = async () => {
     const g = list.find(x => x.supplier === b.dataset.order);
     if (!g) return;
@@ -1191,10 +1236,11 @@ async function viewJustify(st) {
     const text = $('#jt').value.trim().replace(/\s+/g, ' ');
     if (text.length < 10) { $('#jerr').textContent = 'Escreva o motivo com pelo menos 10 letras.'; $('#jerr').classList.remove('hidden'); $('#jt').focus(); return; }
     $('#jsend').disabled = true;
-    const rec = { id: uuid(), date: ymd(now()), at: now().toISOString(), by: S.profile.name, role: S.profile.role, items: [], justification: text, days: st.missing, _dirty: true };
+    const offline = !navigator.onLine;
+    const rec = { id: uuid(), date: ymd(now()), at: now().toISOString(), by: S.profile.name, role: S.profile.role, items: [], justification: text, days: st.missing, _dirty: true, ...(offline ? { _offline: true } : {}) };
     await db.put('counts', rec);
     cloud.syncSoon();
-    toast('Justificativa enviada ao dono.');
+    toast(offline ? 'Justificativa salva neste celular. Ela vai para o dono quando a internet voltar.' : 'Justificativa enviada ao dono.');
     render();
   };
 }
@@ -1226,23 +1272,29 @@ async function viewCount(forceStart) {
     return;
   }
   const draft = loadDraft();
+  // sugestões aceitas da contagem por foto (versão 0.9): id -> { validade, lote, updateExpiry }
+  const photoInfo = draft.__foto || {};
   const plan = countPlan(products, S.moves, now(), p => ['esgotado', 'critico', 'atencao'].includes(level(p)));
   const tag = x => x.near ? '<span class="pill amber">Atenção</span>' : x.used ? '<span class="pill gray">Mais usado</span>' : x.moved7 ? '<span class="pill gray">Mexido esta semana</span>' : '';
   const item = (x, withTag) => { const p = x.p; return `
         <li class="count-item" data-id="${p.id}">
           ${thumbHtml(p)}
-          <div class="info">${esc(p.name)}${p.supplier ? `<small>${esc(p.supplier)}</small>` : ''}${withTag ? tag(x) : ''}</div>
+          <div class="info">${esc(p.name)}${p.supplier ? `<small>${esc(p.supplier)}</small>` : ''}${withTag ? tag(x) : ''}<span class="pill gold photo-tag${photoInfo[p.id] ? '' : ' hidden'}">Pela foto</span></div>
           <input type="number" inputmode="numeric" enterkeyhint="next" min="0" step="1" placeholder="?" aria-label="Quantidade de ${esc(p.name)}" value="${esc(draft[p.id] ?? '')}">
         </li>`; };
   const split = plan.first.length && plan.later.length;
   main().innerHTML = `
     ${st.locked && !isOwner() ? `<div class="banner lock">${I.lock}<span><b>Conferência de segunda-feira.</b> Conte todos os produtos para liberar o app.</span></div>` : ''}
     ${st.state === 'atrasada' ? `<div class="banner red">${I.alert}<span>Conferência atrasada: o prazo de hoje (${esc(S.schedule?.deadline || '18:00')}) já passou.</span></div>` : ''}
+    <div class="banner amber offline-note${navigator.onLine ? ' hidden' : ''}" id="c-off">${I.info}<span><b>Sem internet.</b> Pode contar normalmente: a conferência fica salva neste celular e é enviada sozinha quando a internet voltar.</span></div>
     <div class="eyebrow">Conferência</div>
     <h2>Contagem do estoque</h2>
     <p class="muted small">Conte cada produto e digite a quantidade que existe de verdade na prateleira.</p>
     <div class="count-tools"><div class="small"><b id="done-n">0</b> de ${products.length} contados</div>
-      ${products.some(p => p.barcode) ? `<button type="button" class="secondary small-btn" id="c-scan">${I.scan}Ler código</button>` : ''}</div>
+      <div class="ct-btns"><button type="button" class="secondary small-btn" id="c-photo">${I.camera}Contar por foto</button>
+      ${products.some(p => p.barcode) ? `<button type="button" class="secondary small-btn" id="c-scan">${I.scan}Ler código</button>` : ''}</div></div>
+    <input type="file" accept="image/*" capture="environment" id="c-photo-in" class="hidden">
+    <p class="small muted" style="margin-top:-4px">Tire uma foto de cada prateleira: o app sugere as quantidades, a validade e o lote, e você confere.</p>
     <div class="progress"><div id="bar" style="width:0%"></div></div>
     <div id="clist">
       ${split ? `<div class="count-sec"><h3>Conferir primeiro <span class="muted h-n">${plan.first.length}</span></h3>
@@ -1264,6 +1316,7 @@ async function viewCount(forceStart) {
       if (v !== '') d[li.dataset.id] = v;
       if (ok) n++;
     });
+    if (Object.keys(photoInfo).length) d.__foto = photoInfo;
     saveDraft(d);
     $('#done-n').textContent = n;
     $('#bar').style.width = (products.length ? 100 * n / products.length : 0) + '%';
@@ -1278,6 +1331,71 @@ async function viewCount(forceStart) {
     if (next) { next.focus(); next.closest('li').scrollIntoView({ block: 'center', behavior: 'smooth' }); } else inp.blur();
   }));
   update();
+  // ---- contagem por foto ----
+  const pin = $('#c-photo-in');
+  $('#c-photo').onclick = () => {
+    if (!navigator.onLine) return toast('A contagem por foto precisa de internet. Sem internet, conte e digite normalmente.');
+    pin.value = ''; pin.click();
+  };
+  pin.onchange = async () => {
+    const file = pin.files?.[0];
+    if (!file) return;
+    const close = overlay('Analisando a foto… (leva uns 30 segundos)');
+    let res;
+    try {
+      const jpeg = await shelfJpeg(file);
+      res = await cloud.photoCount(jpeg, products);
+    } catch (e) { close(); return toast('Contagem por foto: ' + (e?.message || e)); }
+    close();
+    photoReview(res);
+  };
+  const photoReview = res => {
+    const byId = new Map(products.map(p => [p.id, p]));
+    const items = (res.itens || []).filter(i => byId.has(i.produto_id));
+    const certeza = { alta: ['Certeza alta', 'green'], media: ['Confira', 'amber'], baixa: ['Pouca certeza', 'red'] };
+    const expTxt = v => v.length === 7 ? `${v.slice(5)}/${v.slice(0, 4)}` : fmtDay(v);
+    const sheet = document.createElement('div');
+    sheet.className = 'photo-sheet';
+    sheet.innerHTML = `<div class="ps-box" role="dialog" aria-label="Sugestões da foto">
+      <h3 style="margin-top:0">O que a foto mostrou</h3>
+      ${items.length ? `<p class="small muted">Confira cada número antes de usar. Você pode corrigir aqui ou depois na lista.</p>
+      <ul class="list ps-list">${items.map(i => { const p = byId.get(i.produto_id); const [ct, tone] = certeza[i.certeza] || certeza.baixa;
+        const cur = p.expiry && /^\d{4}-/.test(p.expiry) ? p.expiry : '';
+        const showExp = i.validade && i.validade.length === 10 && i.validade !== cur;
+        return `<li data-id="${p.id}">
+          <label class="ps-use"><input type="checkbox" checked aria-label="Usar ${esc(p.name)}"></label>
+          <div class="info">${esc(p.name)}<small><span class="pill ${tone}">${ct}</span>${i.validade ? ` Validade ${expTxt(i.validade)}` : ''}${i.lote ? ` · Lote ${esc(i.lote)}` : ''}</small>
+            ${i.obs ? `<small class="muted">${esc(i.obs)}</small>` : ''}
+            ${showExp ? `<label class="small ps-exp"><input type="checkbox" class="ps-upd"${cur ? '' : ' checked'}> Atualizar validade do cadastro para ${fmtDay(i.validade)}${cur ? ` (hoje ${fmtDay(cur)})` : ''}</label>` : ''}</div>
+          <input type="number" inputmode="numeric" min="0" step="1" value="${i.quantidade}" aria-label="Quantidade de ${esc(p.name)}">
+        </li>`; }).join('')}</ul>` : `<p>Nenhum produto cadastrado foi reconhecido nesta foto. Tente de mais perto, com boa luz e os rótulos virados para a câmera.</p>`}
+      ${res.outros?.length ? `<p class="small muted">Também apareceu na foto (não cadastrado): ${res.outros.map(esc).join(', ')}.</p>` : ''}
+      ${items.length ? `<button class="block" id="ps-ok">Usar estas quantidades</button>` : ''}
+      <button class="block secondary" id="ps-cancel" style="margin-top:8px">${items.length ? 'Descartar' : 'Fechar'}</button>
+    </div>`;
+    document.body.appendChild(sheet);
+    $('#ps-cancel', sheet).onclick = () => sheet.remove();
+    const ok = $('#ps-ok', sheet);
+    if (ok) ok.onclick = () => {
+      let n = 0;
+      for (const li of $$('.ps-list li', sheet)) {
+        if (!$('.ps-use input', li).checked) continue;
+        const v = $('input[type=number]', li).value.trim();
+        if (!/^\d+$/.test(v)) continue;
+        const target = $(`#clist li[data-id="${li.dataset.id}"]`);
+        if (!target) continue;
+        $('input', target).value = v;
+        const it = items.find(x => x.produto_id === li.dataset.id);
+        photoInfo[li.dataset.id] = { validade: it.validade, lote: it.lote, updateExpiry: !!$('.ps-upd', li)?.checked };
+        $('.photo-tag', target).classList.remove('hidden');
+        target.classList.add('flash'); setTimeout(() => target.classList.remove('flash'), 1600);
+        n++;
+      }
+      sheet.remove();
+      update();
+      toast(n ? `${plural(n, 'quantidade preenchida', 'quantidades preenchidas')} pela foto. Confira e tire a foto da próxima prateleira.` : 'Nada foi usado.');
+    };
+  };
   const cs = $('#c-scan');
   if (cs) cs.onclick = async () => {
     const code = await scanBarcode('Leia o código do produto que vai contar');
@@ -1304,16 +1422,22 @@ async function viewCount(forceStart) {
     const moves = [];
     for (const p of fresh) {
       if (!(p.id in values)) continue; // produto criado durante a contagem
-      items.push({ productId: p.id, name: p.name, before: p.quantity, counted: values[p.id] });
+      const ph = photoInfo[p.id];
+      items.push({ productId: p.id, name: p.name, before: p.quantity, counted: values[p.id],
+        ...(ph ? { foto: true, ...(ph.validade ? { validade: ph.validade } : {}), ...(ph.lote ? { lote: ph.lote } : {}) } : {}) });
       if (values[p.id] !== Number(p.quantity)) moves.push(makeMove(p, values[p.id], 'conferencia'));
-      updated.push({ ...withQuantity(p, values[p.id]), updatedAt: at, updatedBy: S.profile.name, _dirty: true });
+      const next = { ...withQuantity(p, values[p.id]), updatedAt: at, updatedBy: S.profile.name, _dirty: true };
+      if (ph?.updateExpiry && /^\d{4}-\d{2}-\d{2}$/.test(ph.validade || '')) next.expiry = ph.validade;
+      updated.push(next);
     }
-    const count = { id: uuid(), date: ymd(now()), at: now().toISOString(), by: S.profile.name, role: S.profile.role, items, _dirty: true };
+    const offline = !navigator.onLine;
+    const count = { id: uuid(), date: ymd(now()), at: now().toISOString(), by: S.profile.name, role: S.profile.role, items, _dirty: true, ...(offline ? { _offline: true } : {}) };
     await db.saveMoves(updated, moves, { count });
     cloud.syncSoon();
     try { localStorage.removeItem(draftKey()); } catch { /* ignore */ }
     const lowNow = updated.filter(isLow).length;
-    toast(`Conferência concluída. App liberado.${lowNow ? ` ${plural(lowNow, 'produto ficou', 'produtos ficaram')} abaixo do mínimo.` : ''}`);
+    toast(offline ? 'Conferência salva neste celular. Ela será enviada sozinha quando a internet voltar.'
+      : `Conferência concluída. App liberado.${lowNow ? ` ${plural(lowNow, 'produto ficou', 'produtos ficaram')} abaixo do mínimo.` : ''}`);
     go('#estoque');
   };
   await fillThumbs(main());
@@ -1507,7 +1631,7 @@ async function viewSettings() {
         <div class="hint">A partir desse dia, a conferência é toda segunda-feira.</div>
         <label for="dl">Horário limite</label>
         <input id="dl" type="time" value="${esc(S.schedule?.deadline || '18:00')}">
-        <div class="hint">Passado esse horário sem conferência, ela aparece como atrasada. Segunda-feira que terminar sem conferência precisa de justificativa do funcionário.</div>
+        <div class="hint">Passado esse horário sem conferência, ela aparece como atrasada e você recebe um aviso no celular e por e-mail. Segunda-feira que terminar sem conferência precisa de justificativa do funcionário.</div>
         <p style="margin-bottom:0"><button class="block">Salvar conferência</button></p>
       </form>
     </div>
@@ -1515,7 +1639,7 @@ async function viewSettings() {
     <div class="card"><div id="members" class="small muted">Carregando…</div></div>` : ''}
     <h3>Notificações e número no ícone</h3>
     <div class="card small">
-      <p style="margin-top:0">${isOwner() ? 'Receba no celular um aviso a cada mudança no estoque e, na segunda-feira, um resumo às 8h e o lembrete da conferência às 17h. O número no ícone do app mostra quantos produtos estão abaixo do alerta (inclui os esgotados) ou vencidos, mesmo com o app fechado.' : 'Receba na segunda-feira, às 17h, o lembrete quando a conferência ainda não foi feita. O número no ícone do app mostra quantos produtos estão abaixo do alerta ou vencidos.'}</p>
+      <p style="margin-top:0">${isOwner() ? 'Receba no celular um aviso a cada mudança no estoque e, na segunda-feira, um resumo às 8h, o lembrete da conferência às 17h e um aviso se a conferência passar do horário limite. O número no ícone do app mostra quantos produtos estão abaixo do alerta (inclui os esgotados) ou vencidos, mesmo com o app fechado.' : 'Receba na segunda-feira, às 17h, o lembrete quando a conferência ainda não foi feita. O número no ícone do app mostra quantos produtos estão abaixo do alerta ou vencidos.'}</p>
       <p id="push-st" class="muted">${pushStatusText()}</p>
       ${pushCanAsk() ? `<p style="margin-bottom:0"><button class="block secondary" id="push-on">Ativar notificações</button></p>` : ''}
     </div>
@@ -1547,16 +1671,7 @@ async function viewSettings() {
     const st = $('#push-st');
     po.disabled = true;
     try {
-      const r = await Notification.requestPermission();
-      if (r !== 'granted') { st.textContent = 'Permissão negada. Para ativar depois, libere as notificações do app nos ajustes do celular.'; po.disabled = false; return; }
-      updateBadge();
-      if ('PushManager' in window) {
-        st.textContent = 'Ativando…';
-        const sub = await pushSubscribe();
-        await cloud.pushTest(sub.endpoint, badgeCount());
-        st.textContent = 'Ativado neste celular. Enviei uma notificação de teste.';
-      } else st.textContent = 'Número no ícone ativado neste celular.';
-      po.remove();
+      if (await activatePush(st)) po.remove(); else po.disabled = false;
     } catch (e) {
       st.textContent = 'Não foi possível ativar: ' + (e?.message || e);
       po.disabled = false;
@@ -1579,9 +1694,11 @@ async function viewSettings() {
   };
   try {
     const list = await cloud.members();
+    const phones = await cloud.pushSummary().catch(() => null);
+    const pushTxt = id => { if (!phones) return ''; const n = phones.get(id) || 0; return `<br><span class="${n ? 'ok-ink' : 'muted'}">${n ? `Avisos ligados em ${plural(n, 'celular', 'celulares')}` : 'Avisos desligados'}</span>`; };
     $('#members').innerHTML = list.map(m => `
       <div class="row" style="padding:8px 0;border-bottom:1px solid var(--line)">
-        <div><b style="color:var(--text);font-weight:500">${esc(m.nome)}</b> <span>(${m.papel === 'dono' ? 'dono' : 'funcionário'})</span></div>
+        <div><b style="color:var(--text);font-weight:500">${esc(m.nome)}</b> <span>(${m.papel === 'dono' ? 'dono' : 'funcionário'})</span>${pushTxt(m.user_id)}</div>
         ${m.papel === 'dono' ? '' : `<button class="secondary" style="flex:none;min-height:36px;padding:6px 12px" data-rm="${m.user_id}" data-nome="${esc(m.nome)}">Tirar acesso</button>`}
       </div>`).join('');
     $$('#members [data-rm]').forEach(b => {
@@ -1665,7 +1782,11 @@ function renderChromeOnly() {
 }
 
 // quando chegam dados de outro celular, redesenha (sem atrapalhar quem está digitando)
+const toggleOffline = () => $('#c-off')?.classList.toggle('hidden', navigator.onLine);
+window.addEventListener('online', toggleOffline);
+window.addEventListener('offline', toggleOffline);
 cloud.onChange(async (st, changed) => {
+  if (st.sentOffline) toast(st.sentOffline === 1 ? 'A conferência salva sem internet foi enviada.' : `${st.sentOffline} registros salvos sem internet foram enviados.`);
   if (st.status === 'removed' && S.profile) {
     await cloud.signOut();
     await db.clearData();
