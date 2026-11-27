@@ -233,7 +233,7 @@ li.prod.low .qty .n { color: var(--red); }
 .hero { background: #FBF9F5; border: 1px solid var(--line); border-radius: 20px; display: flex; align-items: center; justify-content: center;
   aspect-ratio: 4 / 3; max-height: 50vh; width: 100%; overflow: hidden; margin: 10px 0 8px; color: var(--nuit); }
 .hero img { width: 100%; height: 100%; object-fit: contain; display: block; }
-.hero .ill { width: 62%; height: 62%; }
+.hero .ill { width: 74%; height: 74%; }
 .big-img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 0; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); margin: 12px 0; }
 .facts > div { padding: 12px 14px; border-bottom: 1px solid var(--line); }

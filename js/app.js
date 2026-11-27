@@ -12,7 +12,7 @@ import { scanBarcode } from './scanner.js';
 import { lookupBarcode, isRetailCode } from './barcode-lookup.js';
 import { installSwipe } from './swipe.js';
 
-export const APP_VERSION = '0.8.5';
+export const APP_VERSION = '0.8.6';
 export { isLow };
 
 // ---------- utilidades ----------
