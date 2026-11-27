@@ -11,7 +11,7 @@ import { consumption, forecastDays, suggestLevels, rateText, forecastText, withQ
 import { scanBarcode } from './scanner.js';
 import { lookupBarcode, isRetailCode } from './barcode-lookup.js';
 
-export const APP_VERSION = '0.8.3';
+export const APP_VERSION = '0.8.4';
 export { isLow };
 
 // ---------- utilidades ----------
@@ -1478,7 +1478,7 @@ async function viewSettings() {
     <div class="card"><div id="members" class="small muted">Carregando…</div></div>` : ''}
     <h3>Notificações e número no ícone</h3>
     <div class="card small">
-      <p style="margin-top:0">${isOwner() ? 'Receba no celular um aviso a cada mudança no estoque, um resumo às 8h (dias úteis) e, na segunda-feira, o lembrete da conferência às 17h. O número no ícone do app mostra quantos produtos estão abaixo do alerta (inclui os esgotados) ou vencidos, mesmo com o app fechado.' : 'Receba na segunda-feira, às 17h, o lembrete quando a conferência ainda não foi feita. O número no ícone do app mostra quantos produtos estão abaixo do alerta ou vencidos.'}</p>
+      <p style="margin-top:0">${isOwner() ? 'Receba no celular um aviso a cada mudança no estoque e, na segunda-feira, um resumo às 8h e o lembrete da conferência às 17h. O número no ícone do app mostra quantos produtos estão abaixo do alerta (inclui os esgotados) ou vencidos, mesmo com o app fechado.' : 'Receba na segunda-feira, às 17h, o lembrete quando a conferência ainda não foi feita. O número no ícone do app mostra quantos produtos estão abaixo do alerta ou vencidos.'}</p>
       <p id="push-st" class="muted">${pushStatusText()}</p>
       ${pushCanAsk() ? `<p style="margin-bottom:0"><button class="block secondary" id="push-on">Ativar notificações</button></p>` : ''}
     </div>

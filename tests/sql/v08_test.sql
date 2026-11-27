@@ -40,7 +40,8 @@ select public.kf_lembrete_conferencia('2026-12-28 20:00Z') = 'conferência ainda
 update public.config set inicio = '2026-11-01';
 -- resumo da manhã: só para o dono, com a contagem
 delete from net.chamadas;
-select public.kf_resumo_manha('2026-12-05 11:02Z') = 'fim de semana' as resumo_sabado;
+select public.kf_resumo_manha('2026-12-05 11:02Z') = 'hoje não é segunda-feira' as resumo_sabado;
+select public.kf_resumo_manha('2026-12-08 11:02Z') = 'hoje não é segunda-feira' as resumo_terca_nao;
 select public.kf_resumo_manha('2026-12-07 11:02Z') like '%esgotado%' as resumo_segunda;
 select coalesce(body->>'todos', 'false') = 'false' and body->>'title' = 'Bom dia · estoque' and (body->>'badge')::int >= 1 as resumo_so_dono_com_numero
   from net.chamadas where url like '%kf-push' order by id desc limit 1;
