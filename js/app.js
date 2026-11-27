@@ -12,7 +12,7 @@ import { scanBarcode } from './scanner.js';
 import { lookupBarcode, isRetailCode } from './barcode-lookup.js';
 import { installSwipe } from './swipe.js';
 
-export const APP_VERSION = '0.9.0';
+export const APP_VERSION = '0.9.1';
 export { isLow };
 
 // ---------- utilidades ----------
@@ -1293,8 +1293,8 @@ async function viewCount(forceStart) {
     <div class="count-tools"><div class="small"><b id="done-n">0</b> de ${products.length} contados</div>
       <div class="ct-btns"><button type="button" class="secondary small-btn" id="c-photo">${I.camera}Contar por foto</button>
       ${products.some(p => p.barcode) ? `<button type="button" class="secondary small-btn" id="c-scan">${I.scan}Ler código</button>` : ''}</div></div>
-    <input type="file" accept="image/*" capture="environment" id="c-photo-in" class="hidden">
-    <p class="small muted" style="margin-top:-4px">Tire uma foto de cada prateleira: o app sugere as quantidades, a validade e o lote, e você confere.</p>
+    <input type="file" accept="image/*" id="c-photo-in" class="hidden">
+    <p class="small muted" style="margin-top:-4px">Tire uma foto de cada prateleira (ou escolha do álbum): o app sugere as quantidades, a validade e o lote, e você confere.</p>
     <div class="progress"><div id="bar" style="width:0%"></div></div>
     <div id="clist">
       ${split ? `<div class="count-sec"><h3>Conferir primeiro <span class="muted h-n">${plan.first.length}</span></h3>
