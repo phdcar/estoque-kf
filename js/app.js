@@ -12,7 +12,7 @@ import { scanBarcode } from './scanner.js';
 import { lookupBarcode, isRetailCode } from './barcode-lookup.js';
 import { installSwipe } from './swipe.js';
 
-export const APP_VERSION = '0.9.1';
+export const APP_VERSION = '0.9.2';
 export { isLow };
 
 // ---------- utilidades ----------
@@ -1291,10 +1291,16 @@ async function viewCount(forceStart) {
     <h2>Contagem do estoque</h2>
     <p class="muted small">Conte cada produto e digite a quantidade que existe de verdade na prateleira.</p>
     <div class="count-tools"><div class="small"><b id="done-n">0</b> de ${products.length} contados</div>
-      <div class="ct-btns"><button type="button" class="secondary small-btn" id="c-photo">${I.camera}Contar por foto</button>
+      <div class="ct-btns">
       ${products.some(p => p.barcode) ? `<button type="button" class="secondary small-btn" id="c-scan">${I.scan}Ler código</button>` : ''}</div></div>
-    <input type="file" accept="image/*" id="c-photo-in" class="hidden">
-    <p class="small muted" style="margin-top:-4px">Tire uma foto de cada prateleira (ou escolha do álbum): o app sugere as quantidades, a validade e o lote, e você confere.</p>
+    <div class="photo-count card">
+      <h4>Contar por foto</h4>
+      <p class="small muted" style="margin:0 0 12px">Uma foto por prateleira: o app sugere as quantidades, a validade e o lote, e você confere.</p>
+      <div class="pc-btns"><button type="button" class="secondary small-btn" id="c-photo">${I.camera}Tirar foto</button>
+      <button type="button" class="secondary small-btn" id="c-album">${I.image}Escolher do álbum</button></div>
+    </div>
+    <input type="file" accept="image/*" capture="environment" id="c-photo-in" class="hidden">
+    <input type="file" accept="image/*" id="c-album-in" class="hidden">
     <div class="progress"><div id="bar" style="width:0%"></div></div>
     <div id="clist">
       ${split ? `<div class="count-sec"><h3>Conferir primeiro <span class="muted h-n">${plan.first.length}</span></h3>
@@ -1332,13 +1338,14 @@ async function viewCount(forceStart) {
   }));
   update();
   // ---- contagem por foto ----
-  const pin = $('#c-photo-in');
-  $('#c-photo').onclick = () => {
+  const pickPhoto = inp => () => {
     if (!navigator.onLine) return toast('A contagem por foto precisa de internet. Sem internet, conte e digite normalmente.');
-    pin.value = ''; pin.click();
+    inp.value = ''; inp.click();
   };
-  pin.onchange = async () => {
-    const file = pin.files?.[0];
+  $('#c-photo').onclick = pickPhoto($('#c-photo-in'));
+  $('#c-album').onclick = pickPhoto($('#c-album-in'));
+  const onPhoto = async e => {
+    const file = e.target.files?.[0];
     if (!file) return;
     const close = overlay('Analisando a foto… (leva uns 30 segundos)');
     let res;
@@ -1349,6 +1356,8 @@ async function viewCount(forceStart) {
     close();
     photoReview(res);
   };
+  $('#c-photo-in').onchange = onPhoto;
+  $('#c-album-in').onchange = onPhoto;
   const photoReview = res => {
     const byId = new Map(products.map(p => [p.id, p]));
     const items = (res.itens || []).filter(i => byId.has(i.produto_id));
@@ -1809,7 +1818,14 @@ cloud.onChange(async (st, changed) => {
 });
 
 if ('serviceWorker' in navigator && !window.__noSW) {
-  navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW', err));
+  navigator.serviceWorker.register('sw.js').then(reg => reg.update()).catch(err => console.warn('SW', err));
+  // versão nova instalada: recarrega uma vez para usar o código novo (o rascunho da contagem fica guardado)
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloaded || ['novo', 'editar'].includes(route().name)) return;
+    reloaded = true; location.reload();
+  });
 }
 
 // pede ao navegador para não apagar os dados locais por falta de espaço
