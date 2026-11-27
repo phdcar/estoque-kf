@@ -803,3 +803,82 @@ h3 .h-n { font-family: var(--sans); font-size: 14px; margin-left: 4px; }
 .photo-count h4 { color: var(--gold-ink, #CDB27E); }
 .pc-btns { display: flex; gap: 8px; flex-wrap: wrap; }
 .pc-btns .small-btn { flex: 1 1 140px; }
+
+/* ---------- Liquid Glass (v0.9.3): vidro translúcido no estilo Apple, só na tela Estoque ----------
+   Camadas: fundo desfocado e saturado (backdrop-filter) + véu claro em degradê + borda de luz
+   (anel em degradê, mais forte no alto à esquerda) + brilho especular interno + sombra suave. */
+main.glass {
+  --g-fill: linear-gradient(150deg, rgba(255,255,255,.115) 0%, rgba(255,255,255,.045) 42%, rgba(255,255,255,.025) 60%, rgba(255,255,255,.07) 100%);
+  --g-blur: blur(18px) saturate(170%) brightness(1.04);
+  --g-rim: linear-gradient(140deg, rgba(255,255,255,.55), rgba(255,255,255,.10) 30%, rgba(255,255,255,.02) 55%, rgba(255,255,255,.14) 80%, rgba(255,255,255,.34));
+  --g-shadow: inset 0 1px 0 rgba(255,255,255,.22), inset 0 -10px 22px -14px rgba(255,255,255,.10), 0 1px 1px rgba(0,0,0,.18), 0 14px 34px -10px rgba(0,0,0,.55);
+}
+main.glass li.prod, main.glass .g-box, main.glass .search input, main.glass .chip, main.glass #l-scan,
+main.glass .qty button, main.glass .thumb.ill, main.glass > .banner, main.glass > .since, main.glass .fab, main.glass .suggest {
+  isolation: isolate;
+  background: var(--g-fill); border-color: transparent;
+  -webkit-backdrop-filter: var(--g-blur); backdrop-filter: var(--g-blur);
+  box-shadow: var(--g-shadow);
+}
+/* borda de luz: anel de 1px em degradê (máscara recorta o miolo) */
+main.glass li.prod::before, main.glass .chip::before, main.glass #l-scan::before, main.glass .qty button::before,
+main.glass .thumb.ill::before, main.glass > .banner::before, main.glass .fab::before, main.glass .search::before {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none; z-index: 2;
+  background: var(--g-rim);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+/* brilho especular: reflexo curvo no alto do vidro */
+main.glass li.prod::after, main.glass .fab::after, main.glass .chip.on::after {
+  content: ''; position: absolute; left: 1px; right: 1px; top: 1px; height: 46%; border-radius: inherit; pointer-events: none; z-index: -1;
+  border-bottom-left-radius: 50% 22px; border-bottom-right-radius: 50% 22px;
+  background: linear-gradient(180deg, rgba(255,255,255,.13), rgba(255,255,255,.03) 70%, transparent);
+}
+main.glass li.prod, main.glass .chip, main.glass #l-scan, main.glass .qty button, main.glass .thumb.ill, main.glass > .banner, main.glass > .since { position: relative; }
+main.glass li.prod { border: 0; border-radius: 26px; }
+main.glass li.prod > * { position: relative; z-index: 1; }
+main.glass li.prod .level, main.glass li.prod .qty { border-top-color: rgba(255,255,255,.09); }
+/* produto abaixo do mínimo: vidro tingido de vermelho, borda vermelha bem visível */
+main.glass li.prod.low { border: 1.5px solid var(--red); background: linear-gradient(150deg, rgba(240,130,118,.26), rgba(224,121,111,.09) 45%, rgba(224,121,111,.05) 60%, rgba(240,130,118,.16));
+  box-shadow: var(--g-shadow), 0 0 26px rgba(224,121,111,.16); }
+main.glass li.prod.low::before { background: linear-gradient(140deg, rgba(255,200,190,.9), rgba(255,255,255,.04) 35%, transparent 65%, rgba(255,190,180,.5)); }
+main.glass li.prod.warn { border: 0; }
+main.glass li.prod.warn::before { background: linear-gradient(140deg, rgba(250,226,170,.85), rgba(235,203,139,.25) 35%, rgba(235,203,139,.10) 60%, rgba(235,203,139,.45)); }
+/* miniaturas: os desenhos 3D ficam num poço de vidro; fotos continuam claras e nítidas */
+main.glass .thumb { border-radius: 16px; }
+main.glass .thumb.ill { background: radial-gradient(120% 90% at 35% 20%, rgba(255,255,255,.16), rgba(255,255,255,.04) 60%, rgba(255,255,255,.07));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.25), inset 0 -6px 12px -8px rgba(0,0,0,.35); -webkit-backdrop-filter: none; backdrop-filter: none; }
+main.glass img.thumb { box-shadow: 0 0 0 1px rgba(255,255,255,.35), 0 6px 14px -6px rgba(0,0,0,.5); border: 0; }
+/* busca e botões */
+main.glass .search { border-radius: 16px; position: relative; }
+main.glass .search input { border-radius: 16px; border: 0; color: var(--ivory); }
+main.glass .search input:focus { outline: none; box-shadow: var(--g-shadow), 0 0 0 2px rgba(205,178,126,.75); }
+main.glass .search svg { z-index: 3; color: rgba(243,239,231,.62); }
+main.glass #l-scan { border: 0; border-radius: 16px; color: var(--ivory); }
+main.glass .chip { border: 0; color: rgba(243,239,231,.82); }
+main.glass .chip.on { background: linear-gradient(150deg, rgba(240,222,176,.36), rgba(205,178,126,.16) 50%, rgba(234,219,178,.24)); color: #fff; }
+main.glass .chip.on::before { background: linear-gradient(140deg, rgba(255,240,205,.95), rgba(205,178,126,.45) 40%, rgba(205,178,126,.25) 65%, rgba(240,222,176,.8)); }
+main.glass .qty button { border: 0; border-radius: 14px; color: #fff; }
+main.glass > .banner { border: 0; }
+main.glass > .banner.red { background: linear-gradient(150deg, rgba(240,130,118,.24), rgba(224,121,111,.08) 55%, rgba(240,130,118,.14)); }
+main.glass > .banner.red::before { background: linear-gradient(140deg, rgba(255,186,176,.9), rgba(224,121,111,.35) 40%, rgba(224,121,111,.25) 65%, rgba(255,170,160,.7)); }
+main.glass > .banner.amber::before { background: linear-gradient(140deg, rgba(250,226,170,.85), rgba(235,203,139,.25) 40%, rgba(235,203,139,.45)); }
+main.glass > .banner > * { position: relative; z-index: 1; }
+/* botão "+ Produto": vidro champanhe */
+main.glass .fab { border: 0; color: #121A24; background: linear-gradient(160deg, rgba(246,232,196,.92), rgba(214,188,134,.82) 55%, rgba(205,178,126,.9));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.7), inset 0 -8px 16px -10px rgba(120,90,40,.5), 0 14px 34px -8px rgba(0,0,0,.6), 0 0 26px rgba(205,178,126,.28); }
+main.glass .fab::before { background: linear-gradient(140deg, rgba(255,255,255,.95), rgba(255,255,255,.2) 40%, rgba(255,255,255,.05) 60%, rgba(255,255,255,.6)); }
+main.glass .fab::after { background: linear-gradient(180deg, rgba(255,255,255,.45), rgba(255,255,255,.08) 75%, transparent); }
+main.glass .fab > * { position: relative; z-index: 1; }
+main.glass .suggest { background: linear-gradient(150deg, rgba(40,50,64,.97), rgba(20,28,39,.97)); border-radius: 18px; border: 1px solid rgba(255,255,255,.16); z-index: 40; }
+main.glass > .card { background: var(--g-fill); border-color: rgba(255,255,255,.12); -webkit-backdrop-filter: var(--g-blur); backdrop-filter: var(--g-blur); box-shadow: var(--g-shadow); border-radius: 26px; }
+/* toque: o vidro "afunda" e acende levemente */
+main.glass li.prod:active, main.glass .chip:active, main.glass .qty button:active, main.glass #l-scan:active { filter: brightness(1.12); }
+/* celulares sem desfoque, ou com "Reduzir transparência" ligado: vidro opaco e legível */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  main.glass li.prod, main.glass .chip, main.glass #l-scan, main.glass .qty button, main.glass .search input, main.glass > .banner { background-color: rgba(30,40,54,.92); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  main.glass li.prod, main.glass .chip, main.glass #l-scan, main.glass .qty button, main.glass .search input, main.glass > .banner, main.glass .suggest {
+    -webkit-backdrop-filter: none; backdrop-filter: none; background-color: #1B2532; }
+}

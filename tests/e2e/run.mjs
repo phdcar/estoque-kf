@@ -742,6 +742,12 @@ try {
         assert.deepEqual(over, [], `${who} ${r}: elementos passando da tela`);
         if (r.startsWith('#editar')) { await pg.evaluate(() => document.querySelector('.vrow, .lot-note').scrollIntoView({ block: 'center' })); await pg.waitForTimeout(300); await pg.screenshot({ path: path.join(SHOTS, 'qa', 'vrow.png') }); }
         await pg.screenshot({ path: path.join(SHOTS, 'qa', `${who}-${r.slice(1).replace(/\//g, '_').slice(0, 20)}.png`), fullPage: true });
+        // Estoque: também a tela como aparece no celular (topo e rolada), para revisar o vidro (Liquid Glass)
+        if (r === '#estoque' && who === 'dono') {
+          await pg.screenshot({ path: path.join(SHOTS, 'qa', 'estoque-tela-topo.png') });
+          await pg.evaluate(() => window.scrollTo(0, 430)); await pg.waitForTimeout(400);
+          await pg.screenshot({ path: path.join(SHOTS, 'qa', 'estoque-tela-rolada.png') });
+        }
       }
     }
   });

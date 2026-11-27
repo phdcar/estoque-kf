@@ -12,7 +12,7 @@ import { scanBarcode } from './scanner.js';
 import { lookupBarcode, isRetailCode } from './barcode-lookup.js';
 import { installSwipe } from './swipe.js';
 
-export const APP_VERSION = '0.9.2';
+export const APP_VERSION = '0.9.3';
 export { isLow };
 
 // ---------- utilidades ----------
@@ -289,6 +289,7 @@ async function doRender() {
   const key = r.name + '/' + (r.arg || '');
   const changed = key !== lastRoute; lastRoute = key;
   ANIM.forEach(c => main().classList.toggle(c, false));
+  main().classList.toggle('glass', r.name === 'estoque');
   if (changed) {
     void main().offsetWidth; main().classList.add('enter');
     if (swipeDir) main().classList.add(swipeDir === 'left' ? 'from-right' : 'from-left');
