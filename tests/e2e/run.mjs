@@ -584,6 +584,56 @@ try {
     await op.evaluate(() => { delete window.__KF_FAKE_SCAN; });
   });
 
+  await step('código novo: sugere o nome pela base pública, liga a um produto ou cadastra um novo', async () => {
+    // bases públicas imitadas: Open Food Facts conhece 7894900011517; as outras não conhecem nada
+    await op.context().route(/open(food|beauty|products)facts\.org\/api\/v2\/product\//, route => {
+      const u = route.request().url();
+      if (u.includes('openfoodfacts') && u.includes('7894900011517'))
+        return route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' },
+          body: JSON.stringify({ status: 1, product: { product_name: 'LUVA NITRILICA AZUL', quantity: '100 un', brands: 'Marca Teste' } }) });
+      return route.fulfill({ status: 404, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: '{"status":0}' });
+    });
+    await op.setViewportSize({ width: 390, height: 844 });
+    // 1) achou na base: mostra a sugestão e cadastra com o nome
+    await nav(op, '#estoque');
+    await op.evaluate(() => { window.__KF_FAKE_SCAN = '7894900011517'; });
+    await op.click('#l-scan');
+    await waitHash(op, '#codigo/7894900011517');
+    await op.waitForSelector('.bc-found');
+    assert.match(await op.textContent('.bc-found'), /Luva nitrilica azul 100 un.*Marca Teste · Open Food Facts/s);
+    // a busca de produto existente já começa pela primeira palavra da sugestão
+    assert.equal(await op.inputValue('#bl-q'), 'Luva');
+    assert.match(await op.textContent('#bl-list'), /Luva de procedimento M/);
+    await op.evaluate(() => document.querySelectorAll('.toast').forEach(t => t.remove()));
+    await op.waitForTimeout(300);
+    await op.screenshot({ path: path.join(SHOTS, 'qa', 'codigo-novo-sugestao.png') });
+    await op.click('#bc-new');
+    await waitHash(op, '#novo');
+    assert.equal(await op.inputValue('#nm'), 'Luva nitrilica azul 100 un');
+    assert.equal(await op.inputValue('#bc'), '7894900011517');
+    assert.match(await op.textContent('#f'), /Nome sugerido pela base pública/);
+    // 2) não achou: liga a um produto que já existe
+    await nav(op, '#estoque');
+    await op.evaluate(() => { window.__KF_FAKE_SCAN = '7890000000017'; });
+    await op.click('#l-scan');
+    await waitHash(op, '#codigo/7890000000017');
+    await op.waitForFunction(() => /Não achei este código/.test(document.querySelector('#bc-sug')?.textContent || ''));
+    await op.fill('#bl-q', 'agulha');
+    await op.dispatchEvent('#bl-q', 'input');
+    await op.click('#bl-list .bl-it');
+    await waitHash(op, '#produto/');
+    const ag = fake.tables.produtos.find(p => p.nome === 'Agulha 31G');
+    await synced(op);
+    assert.equal(fake.tables.produtos.find(p => p.id === ag.id).codigo_barras, '7890000000017');
+    // 3) ler de novo o mesmo código abre o produto direto
+    await nav(op, '#estoque');
+    await op.evaluate(() => { window.__KF_FAKE_SCAN = '7890000000017'; });
+    await op.click('#l-scan');
+    await waitHash(op, '#produto/' + ag.id);
+    await op.evaluate(() => { delete window.__KF_FAKE_SCAN; });
+    await op.context().unroute(/open(food|beauty|products)facts\.org\/api\/v2\/product\//);
+  });
+
   await step('relatórios: resumo do mês com gasto, perdas e fornecedores', async () => {
     await nav(op, '#historico');
     const t = (await op.textContent('main')).replace(/\s+/g, ' ');

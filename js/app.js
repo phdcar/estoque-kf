@@ -9,8 +9,9 @@ import { startAmbient, skyState, PERIOD_NAME, tapURI } from './ambient.js';
 import { consumption, forecastDays, suggestLevels, rateText, forecastText, withQuantity, addLot, lotsTotal, sortedLots,
   expiriesByMonth, stockValue, monthSummary, monthKey, brl, orderText, whatsappUrl, priceHistory, priceTrend, priceBySupplier, pctText, countPlan } from './insights.js';
 import { scanBarcode } from './scanner.js';
+import { lookupBarcode, isRetailCode } from './barcode-lookup.js';
 
-export const APP_VERSION = '0.8.1';
+export const APP_VERSION = '0.8.2';
 export { isLow };
 
 // ---------- utilidades ----------
@@ -215,7 +216,7 @@ function renderChrome(r) {
     ...(isOwner() ? [['historico', I.calendar, 'Relatórios']] : []),
     ['ajustes', I.gear, 'Ajustes'],
   ];
-  const active = k => r.name === k || (k === 'estoque' && ['produto', 'novo', 'editar'].includes(r.name)) || (k === 'historico' && r.name === 'precos');
+  const active = k => r.name === k || (k === 'estoque' && ['produto', 'novo', 'editar', 'codigo'].includes(r.name)) || (k === 'historico' && r.name === 'precos');
   tabs.innerHTML = items.map(([k, ico, label, badge]) =>
     `<a href="#${k}" class="${active(k) ? 'on' : ''} ${lk && k !== 'conferencia' ? 'disabled' : ''}" data-tab="${k}"
       ${active(k) ? 'aria-current="page"' : ''}>${ico}${label}${badge ? `<span class="dot">${badge}</span>` : ''}</a>`).join('');
@@ -249,6 +250,7 @@ async function doRender() {
     case 'novo': return viewForm(null);
     case 'editar': return viewForm(r.arg);
     case 'produto': return viewProduct(r.arg);
+    case 'codigo': return viewBarcode(decodeURIComponent(r.arg || ''));
     case 'pedido': return viewOrder(r.arg);
     case 'estoque': return viewList(r.arg);
     case 'conferencia': return viewCount();
@@ -629,6 +631,7 @@ function bindSuggest(q) {
   });
 }
 let pendingBarcode = '';
+let pendingName = ''; // nome sugerido pela base pública (versão 0.8.2)
 let category = '';
 const FILTERS = [['todos', 'Todos'], ['alerta', 'Abaixo do mínimo'], ['atencao', 'No limite'], ['ok', 'Em dia'], ['validade', 'Validade'], ['incompleto', 'Incompletos']];
 const matchFilter = (p, f) => f === 'alerta' ? isLow(p) : f === 'atencao' ? level(p) === 'atencao'
@@ -668,7 +671,7 @@ async function viewList(filter = 'todos') {
     if (!code) return;
     const prod = S.products.find(x => x.barcode === code);
     if (prod) return go('#produto/' + prod.id);
-    if (confirm(`O código ${code} não está em nenhum produto. Cadastrar um produto novo com esse código?`)) { pendingBarcode = code; go('#novo'); }
+    go('#codigo/' + encodeURIComponent(code));
   };
   const q = $('#q');
   if (q) { q.oninput = () => { searchTerm = q.value; applySearch(); showSuggest(q); }; applySearch(); bindSuggest(q); }
@@ -935,7 +938,8 @@ async function viewForm(id) {
     <p class="lead small">Todos os campos com ${req} são obrigatórios.</p>
     <form id="f" autocomplete="off" novalidate class="card">
       <label for="nm" style="margin-top:0">Nome do produto ${req}</label>
-      <input id="nm" type="text" maxlength="80" value="${esc(p?.name || '')}" placeholder="Ex.: Luva de procedimento M">
+      <input id="nm" type="text" maxlength="80" value="${esc(p?.name || (!p && pendingName) || '')}" placeholder="Ex.: Luva de procedimento M">
+      ${!p && pendingName ? `<div class="hint gold-hint">Nome sugerido pela base pública do código de barras. Confira e ajuste antes de salvar.</div>` : ''}
       <label for="ct">Categoria ${req}</label>
       <input id="ct" type="text" maxlength="40" list="ct-list" value="${esc(p?.category || '')}" placeholder="Ex.: Insumos">
       <datalist id="ct-list">${categories().map(c => `<option value="${esc(c)}">`).join('')}</datalist>
@@ -985,8 +989,17 @@ async function viewForm(id) {
       <div id="err" class="banner red hidden" role="alert" style="margin:14px 0 0"></div>
       <p style="margin-top:16px"><button class="block" type="submit" id="save">Salvar</button></p>
     </form>`;
-  pendingBarcode = '';
-  $('#bc-scan').onclick = async () => { const c = await scanBarcode('Leia o código de barras do produto'); if (c) $('#bc').value = c; };
+  pendingBarcode = ''; pendingName = '';
+  $('#bc-scan').onclick = async () => {
+    const c = await scanBarcode('Leia o código de barras do produto');
+    if (!c) return;
+    $('#bc').value = c;
+    // produto novo sem nome: tenta sugerir pelo código nas bases públicas
+    if (!p && !$('#nm').value.trim() && isRetailCode(c)) {
+      const s = await lookupBarcode(c);
+      if (s && !$('#nm').value.trim()) { $('#nm').value = sentenceCase(s.name); toast('Nome sugerido pela base pública. Confira antes de salvar.'); }
+    }
+  };
   if ($('#nd')) $('#nd').onchange = () => { $('#vl').disabled = $('#nd').checked; if ($('#nd').checked) $('#vl').value = ''; $('#vl').dispatchEvent(new Event('input')); };
   $('#cam').onclick = () => $('#f-cam').click();
   $('#gal').onclick = () => $('#f-gal').click();
@@ -1057,6 +1070,65 @@ async function viewForm(id) {
     toast(p ? 'Produto atualizado' : 'Produto cadastrado');
     go('#produto/' + rec.id);
   };
+}
+
+// ---------- tela: código de barras sem produto (versão 0.8.2) ----------
+// Procura o código nas bases públicas para sugerir o nome; liga o código a um produto existente ou cadastra um novo.
+async function viewBarcode(code) {
+  if (!code) return go('#estoque');
+  const owner = S.products.find(x => x.barcode === code);
+  if (owner) return go('#produto/' + owner.id);
+  const retail = isRetailCode(code);
+  main().innerHTML = `
+    <a class="back" href="#estoque">${I.back}Voltar</a>
+    <div class="eyebrow">Código de barras</div>
+    <h2>Código novo</h2>
+    <p class="lead small">O código <b class="mono">${esc(code)}</b> ainda não está em nenhum produto. Ligue a um produto que já existe ou cadastre um novo. Isso é feito uma vez só: depois, ao ler este código, o app abre o produto na hora.</p>
+    <div class="card bc-sug" id="bc-sug">${retail
+      ? `<div class="bc-wait">${I.search}<span>Procurando o código nas bases públicas…</span></div>`
+      : `<p class="small muted" style="margin:0">Este tipo de código não é de produto de varejo, então não há base pública para consultar.</p>`}
+      <p style="margin:14px 0 0"><button class="block" id="bc-new">${I.plus}Cadastrar produto novo</button></p></div>
+    <h3>Ligar a um produto que já existe</h3>
+    <div class="search" id="bl-box">${I.search}<input type="search" id="bl-q" placeholder="Nome ou fornecedor" autocomplete="off" aria-label="Buscar produto para ligar"></div>
+    <div class="card bc-list" id="bl-list"></div>`;
+  let sug = null;
+  const newBtn = () => { $('#bc-new').onclick = () => { pendingBarcode = code; pendingName = sug ? sentenceCase(sug.name) : ''; go('#novo'); }; };
+  newBtn();
+  const list = () => {
+    const t = $('#bl-q').value;
+    const base = fold(t) ? searchProducts(S.products, t) : [...S.products].sort((a, b) => (!!a.barcode - !!b.barcode) || byName(a, b));
+    $('#bl-list').innerHTML = base.length ? base.slice(0, 30).map(p => `<button type="button" class="bl-it" data-id="${p.id}">
+        <span><span class="t">${fold(t) ? markMatch(p.name, t) : esc(p.name)}</span><small>${esc(p.supplier || 'Sem fornecedor')}${p.barcode ? ' · já tem outro código' : ''}</small></span><span class="go">Ligar</span></button>`).join('')
+      : `<p class="small muted" style="margin:0">Nenhum produto com “${esc(t.trim())}”.</p>`;
+    $$('#bl-list .bl-it').forEach(b => b.onclick = async () => {
+      const p = await db.get('products', b.dataset.id);
+      if (!p) return;
+      if (p.barcode && p.barcode !== code && !confirm(`"${p.name}" já tem o código ${p.barcode}. Trocar pelo código ${code}?`)) return;
+      await db.saveMoves([{ ...p, barcode: code, updatedAt: new Date().toISOString(), updatedBy: S.profile.name, _dirty: true }], []);
+      cloud.syncSoon();
+      toast(`Código ligado a ${p.name}.`);
+      go('#produto/' + p.id);
+    });
+  };
+  $('#bl-q').oninput = list;
+  list();
+  if (!retail) return;
+  sug = await lookupBarcode(code);
+  if (route().name !== 'codigo') return; // a pessoa saiu da tela enquanto procurava
+  const box = $('#bc-sug');
+  if (sug) {
+    box.innerHTML = `<div class="bc-found">${sug.image ? `<img src="${esc(sug.image)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}
+        <div><span class="lbl">Sugestão da base pública</span><b>${esc(sentenceCase(sug.name))}</b><small>${sug.brand ? esc(sug.brand) + ' · ' : ''}${esc(sug.source)}</small></div></div>
+      <p style="margin:14px 0 0"><button class="block" id="bc-new">${I.plus}Cadastrar com este nome</button></p>
+      <p class="small muted" style="margin:10px 0 0">Confira o nome antes de salvar: as bases públicas são preenchidas por voluntários.</p>`;
+    // a busca de produto existente começa pelo que mais parece com a sugestão
+    const first = sentenceCase(sug.name).split(' ')[0];
+    if (!$('#bl-q').value && searchProducts(S.products, first).length) { $('#bl-q').value = first; list(); }
+  } else {
+    box.innerHTML = `<p class="small muted" style="margin:0">Não achei este código nas bases públicas (Open Food Facts e similares). É comum com material de clínica.</p>
+      <p style="margin:14px 0 0"><button class="block" id="bc-new">${I.plus}Cadastrar produto novo</button></p>`;
+  }
+  newBtn();
 }
 
 // ---------- tela: conferência ----------
