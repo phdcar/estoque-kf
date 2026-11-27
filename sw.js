@@ -1,9 +1,9 @@
 // Service worker: guarda os arquivos do app para abrir sem internet.
-const VERSION = 'kf-estoque-v0.8.6';
+const VERSION = 'kf-estoque-v0.9.0';
 const ASSETS = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/app.js', 'js/ambient.js', 'js/db.js', 'js/stock.js', 'js/illustrations.js', 'js/icons.js', 'js/lineart.js', 'js/schedule.js', 'js/cloud.js', 'js/config.js', 'js/insights.js', 'js/scanner.js', 'js/barcode-lookup.js', 'js/swipe.js',
-  'js/vendor/supabase.js', 'js/vendor/591.supabase.js',
+  'js/vendor/supabase.js', 'js/vendor/591.supabase.js', 'js/vendor/zxing-0.21.3.min.js',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/maskable-512.png', 'icons/kf-logo.png',
   'fonts/jost-latin-300-normal.woff2', 'fonts/jost-latin-400-normal.woff2', 'fonts/jost-latin-500-normal.woff2',
   'fonts/jost-latin-600-normal.woff2', 'fonts/bodoni-moda-latin-500-normal.woff2',

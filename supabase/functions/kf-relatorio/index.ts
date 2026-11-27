@@ -27,6 +27,8 @@ const dia = (s: string) => s.slice(0, 10).split('-').reverse().join('/');
 // mês no horário de Brasília
 const mesDe = (iso: string) => new Date(Date.parse(iso) - 3 * 3600e3).toISOString().slice(0, 7);
 
+export const SEMANAL_DESDE = '2026-11-27';
+
 export function resumo(d: { mes: string; hoje: string; produtos: any[]; movimentos: any[]; conferencias: any[]; pedidos: any[]; config: any }) {
   const ps = d.produtos.filter(p => !p.excluido);
   const ms = d.movimentos.filter(m => mesDe(m.feito_em) === d.mes);
@@ -55,7 +57,9 @@ export function resumo(d: { mes: string; hoje: string; produtos: any[]; moviment
     if (dt.getUTCMonth() !== mo - 1) break;
     const s = dt.toISOString().slice(0, 10);
     const w = dt.getUTCDay();
-    if (w >= 1 && w <= 5 && s >= (d.config?.inicio || '0000') && s < d.hoje) dias.push(s);
+    // até 26/11/2026 a conferência era de segunda a sexta; desde 27/11/2026 é só na segunda-feira (versão 0.8.3)
+    const obrigatorio = s < SEMANAL_DESDE ? w >= 1 && w <= 5 : w === 1;
+    if (obrigatorio && s >= (d.config?.inicio || '0000') && s < d.hoje) dias.push(s);
   }
   const feitos = new Set(d.conferencias.filter(c => !c.justificativa).map(c => String(c.dia).slice(0, 10)));
   const justs = d.conferencias.filter(c => c.justificativa && (c.dias || [c.dia]).some((x: string) => String(x).slice(0, 7) === d.mes));

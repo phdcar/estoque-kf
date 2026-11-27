@@ -880,6 +880,93 @@ try {
     await op.fill('#q', ''); await op.dispatchEvent('#q', 'input');
   });
 
+  await step('contagem por foto: sugere quantidade, validade e lote; a pessoa confere e usa', async () => {
+    await nav(op, '#conferencia');
+    if (await op.$('#extra')) await op.click('#extra');
+    await op.waitForSelector('#c-photo');
+    await op.setInputFiles('#c-photo-in', path.join(FIX, 'produto-grande.jpg'));
+    await op.waitForSelector('.photo-sheet .ps-list li');
+    assert.equal(fake.fotoCalls, 1);
+    // a foto vai reduzida (lado maior até 1800 px) e a lista não leva quantidades (contagem continua cega)
+    assert.ok(fake.lastFoto.imagem.length < 1_500_000, 'foto grande demais: ' + fake.lastFoto.imagem.length);
+    assert.ok(fake.lastFoto.produtos.every(p => !('quantidade' in p) && !('quantity' in p)));
+    const sheet = await op.textContent('.photo-sheet');
+    assert.match(sheet, /Campo cirúrgico/); assert.match(sheet, /Lote L2611/); assert.match(sheet, /Validade 03\/2027/);
+    assert.match(sheet, /Luvas de procedimento/); assert.match(sheet, /Certeza alta/); assert.match(sheet, /Confira/);
+    await op.waitForTimeout(400);
+    await op.screenshot({ path: path.join(SHOTS, '30-contagem-por-foto.png') });
+    // corrige um número antes de usar
+    await op.locator('.ps-list li', { hasText: 'Fio de sutura' }).locator('input[type=number]').fill('8');
+    await op.click('#ps-ok');
+    await op.waitForSelector('.photo-sheet', { state: 'detached' });
+    const ci = n => op.locator('#clist li', { hasText: n });
+    assert.equal(await ci('Campo cirúrgico').locator('input').inputValue(), '12');
+    assert.equal(await ci('Fio de sutura').locator('input').inputValue(), '8');
+    assert.equal(await ci('Campo cirúrgico').locator('.photo-tag:not(.hidden)').count(), 1);
+    await op.screenshot({ path: path.join(SHOTS, '31-contagem-pela-foto-preenchida.png'), fullPage: true });
+    // conclui: grava validade nova do Campo cirúrgico e o lote fica no registro da conferência
+    for (const inp of await op.locator('#clist input').all()) if (!(await inp.inputValue())) await inp.fill('3');
+    await op.click('#finish');
+    await waitHash(op, '#estoque');
+    await synced(op);
+    const campo = fake.tables.produtos.find(p => p.nome === 'Campo cirúrgico');
+    assert.equal(campo.quantidade, 12);
+    assert.equal(String(campo.validade).slice(0, 10), '2027-08-31');
+    const conf = fake.tables.conferencias[fake.tables.conferencias.length - 1];
+    const it = conf.itens.find(i => i.name === 'Campo cirúrgico');
+    assert.equal(it.lote, 'L2611'); assert.equal(it.foto, true);
+  });
+
+  await step('sem internet: a conferência fica salva no celular e é enviada quando a internet volta', async () => {
+    const before = fake.tables.conferencias.length;
+    await nav(op, '#conferencia');
+    if (await op.$('#extra')) await op.click('#extra');
+    await op.waitForSelector('#clist input');
+    await own.ctx.setOffline(true);
+    await op.evaluate(() => window.dispatchEvent(new Event('offline')));
+    await op.waitForSelector('#c-off:not(.hidden)');
+    await op.screenshot({ path: path.join(SHOTS, '32-conferencia-sem-internet.png') });
+    // contagem por foto avisa que precisa de internet
+    await op.click('#c-photo');
+    await op.getByText('A contagem por foto precisa de internet').waitFor();
+    for (const inp of await op.locator('#clist input').all()) await inp.fill('5');
+    await op.click('#finish');
+    await op.getByText('Conferência salva neste celular. Ela será enviada sozinha quando a internet voltar.').waitFor();
+    await waitHash(op, '#estoque');
+    await op.waitForFunction(() => /offline/.test(document.querySelector('#sync')?.textContent || ''));
+    assert.equal(fake.tables.conferencias.length, before);
+    // fechar e abrir o app sem internet: continua salva
+    await op.reload(); await op.waitForFunction(() => !!window.__app); await op.evaluate(() => window.__app.idle());
+    assert.equal(fake.tables.conferencias.length, before);
+    await own.ctx.setOffline(false);
+    await op.evaluate(() => window.dispatchEvent(new Event('online')));
+    await op.getByText('A conferência salva sem internet foi enviada.').waitFor({ timeout: 15000 });
+    assert.equal(fake.tables.conferencias.length, before + 1);
+  });
+
+  await step('cartão "Ative os avisos" no painel e celulares com avisos em Ajustes', async () => {
+    await op.evaluate(() => { try { localStorage.removeItem('kf-avisos-depois'); } catch {} });
+    // o Chromium sem tela nega notificações; finge um celular que ainda não respondeu
+    await op.addInitScript(() => { try { Object.defineProperty(Notification, 'permission', { get: () => 'default' }); } catch {} });
+    await nav(op, '#painel');
+    await op.reload(); await op.waitForFunction(() => !!window.__app); await op.evaluate(() => window.__app.idle());
+    const perm = await op.evaluate(() => typeof Notification === 'undefined' ? 'none' : Notification.permission);
+    if (perm === 'default') {
+      await op.waitForSelector('#push-card #pc-on');
+      assert.match(await op.textContent('#push-card'), /aviso de conferência atrasada/);
+      await op.screenshot({ path: path.join(SHOTS, '33-painel-ativar-avisos.png') });
+      await op.click('#pc-later');
+      await op.waitForSelector('#push-card', { state: 'detached' });
+      await op.reload(); await op.waitForFunction(() => !!window.__app); await op.evaluate(() => window.__app.idle());
+      assert.equal(await op.$('#push-card'), null); // "Agora não" esconde por 7 dias
+    } else console.log('       (Notification.permission =', perm, ': cartão não se aplica neste navegador)');
+    await nav(op, '#ajustes');
+    await op.waitForFunction(() => /Avisos desligados/.test(document.querySelector('#members')?.textContent || ''));
+    fake.ownerPhones = 1;
+    await op.reload(); await op.waitForFunction(() => !!window.__app);
+    await op.waitForFunction(() => /Avisos ligados em 1 celular/.test(document.querySelector('#members')?.textContent || ''));
+  });
+
   await step('dono tira o acesso do funcionário', async () => {
     await nav(op, '#ajustes');
     await op.waitForSelector('#members [data-rm]');

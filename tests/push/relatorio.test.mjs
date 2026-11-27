@@ -37,6 +37,9 @@ assert.deepEqual(r.fornecedores.map(f => f.nome), ['Mercado Livre', 'Dental Crem
 assert.deepEqual(r.uso.map(u => [u.nome, u.un]), [['Seringa 5 ml', 47]]);
 assert.deepEqual([r.diasUteis, r.feitas, r.justificadas, r.naoFeitas], [4, 2, 1, 1]); // 23, 24, 25 (justificada), 26 (não feita)
 assert.deepEqual(r.abaixo.map(p => p.nome), ['Seringa 5 ml']);
+// dezembro: conferência só nas segundas-feiras (1º a 21/12: segundas 7, 14 e 21; até ontem = 22/12)
+const rd = resumo({ mes: '2026-12', hoje: '2026-12-22', produtos, movimentos, conferencias: [{ dia: '2026-12-07', por_nome: 'Bruna' }, { dia: '2026-12-09', por_nome: 'Bruna' }], pedidos, config: { inicio: '2026-11-23' } });
+assert.deepEqual([rd.diasUteis, rd.feitas, rd.naoFeitas], [3, 1, 2]);
 assert.deepEqual(r.vencimentos.map(v => v.nome), ['Seringa 5 ml']);
 assert.equal(r.pedidos.length, 1);
 const pdf = await montarPdf(PDFLib, r);

@@ -45,8 +45,17 @@ PWA (app instalável pelo navegador) de controle de estoque, em português do Br
 - Regra do dono (27/11/2026): a conferência é semanal, na segunda-feira. Lembrete às 17h só na segunda
   (`supabase/migracao-0.8.3.sql`). O aviso do radar conta as segundas-feiras sem conferência.
 
-## Próxima etapa
-3. Avisos no celular do dono (Web Push).
+## Versão 0.9: aviso de atraso, sem internet, avisos fáceis de ligar e contagem por foto
+- Aviso ao dono quando a conferência de segunda passa do horário limite: `supabase/migracao-0.9.sql`
+  (`kf_aviso_atrasada`, pg_cron a cada 10 min segunda/terça UTC, uma vez por dia, push + e-mail via `kf_enviar_email`).
+  `kf_push_resumo()` mostra ao dono, em Ajustes, quantos celulares de cada pessoa têm avisos ligados.
+- Sem internet: a conferência e a justificativa ficam no celular (IndexedDB) e são enviadas quando a internet volta;
+  a tela avisa e um aviso confirma o envio. O leitor de código também fica guardado para abrir sem internet.
+- Cartão "Ative os avisos neste celular" no painel (no iPhone fora da Tela de Início, explica como instalar).
+- Contagem por foto: botão na conferência → Edge Function `kf-foto` (Claude, chave `ANTHROPIC_API_KEY` nos segredos
+  das Edge Functions, "Verify JWT" desligado) sugere quantidade, validade e lote; a pessoa confere antes de usar.
+  A lista enviada não leva as quantidades do sistema (a contagem continua cega).
+- Relatório mensal: desde 27/11/2026 só as segundas-feiras contam como dia de conferência.
 
 ## Rodar e testar
 ```
@@ -54,4 +63,5 @@ python3 -m http.server 8080     # abrir http://localhost:8080
 node --test tests/unit/*.test.js
 tests/sql/run.sh                # testa o schema.sql num Postgres 16 local
 node tests/e2e/run.mjs          # Playwright com Chromium, contra um Supabase falso
+node --experimental-strip-types tests/push/foto.test.mjs
 ```
