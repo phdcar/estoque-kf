@@ -798,3 +798,8 @@ h3 .h-n { font-family: var(--sans); font-size: 14px; margin-left: 4px; }
 .ps-list li input[type=number] { width: 76px; flex: none; text-align: center; }
 .ps-use input, .ps-exp input { width: 20px; height: 20px; accent-color: var(--gold, #CDB27E); }
 .ps-exp { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+
+.photo-count { margin: 8px 0 14px; }
+.photo-count h4 { color: var(--gold-ink, #CDB27E); }
+.pc-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.pc-btns .small-btn { flex: 1 1 140px; }

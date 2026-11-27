@@ -884,7 +884,10 @@ try {
     await nav(op, '#conferencia');
     if (await op.$('#extra')) await op.click('#extra');
     await op.waitForSelector('#c-photo');
-    await op.setInputFiles('#c-photo-in', path.join(FIX, 'produto-grande.jpg'));
+    // dois caminhos: câmera (capture) e álbum (sem capture)
+    assert.equal(await op.getAttribute('#c-photo-in', 'capture'), 'environment');
+    assert.equal(await op.getAttribute('#c-album-in', 'capture'), null);
+    await op.setInputFiles('#c-album-in', path.join(FIX, 'produto-grande.jpg'));
     await op.waitForSelector('.photo-sheet .ps-list li');
     assert.equal(fake.fotoCalls, 1);
     // a foto vai reduzida (lado maior até 1800 px) e a lista não leva quantidades (contagem continua cega)

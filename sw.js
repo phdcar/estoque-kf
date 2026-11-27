@@ -1,5 +1,5 @@
 // Service worker: guarda os arquivos do app para abrir sem internet.
-const VERSION = 'kf-estoque-v0.9.1';
+const VERSION = 'kf-estoque-v0.9.2';
 const ASSETS = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/app.js', 'js/ambient.js', 'js/db.js', 'js/stock.js', 'js/illustrations.js', 'js/icons.js', 'js/lineart.js', 'js/schedule.js', 'js/cloud.js', 'js/config.js', 'js/insights.js', 'js/scanner.js', 'js/barcode-lookup.js', 'js/swipe.js',
@@ -10,7 +10,7 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(VERSION).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(VERSION).then(c => c.addAll(ASSETS.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {
@@ -24,7 +24,8 @@ self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
   e.respondWith(
-    fetch(req).then(res => {
+    // no-cache: confere com o servidor sempre (o GitHub Pages guarda arquivos por 10 min e a versão nova demorava a chegar)
+    fetch(req.mode === 'navigate' ? req : new Request(req, { cache: 'no-cache' })).then(res => {
       if (res.ok) { const copy = res.clone(); caches.open(VERSION).then(c => c.put(req, copy)); }
       return res;
     }).catch(() => caches.match(req, { ignoreSearch: true })
