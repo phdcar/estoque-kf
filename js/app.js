@@ -10,8 +10,9 @@ import { consumption, forecastDays, suggestLevels, rateText, forecastText, withQ
   expiriesByMonth, stockValue, monthSummary, monthKey, brl, orderText, whatsappUrl, priceHistory, priceTrend, priceBySupplier, pctText, countPlan } from './insights.js';
 import { scanBarcode } from './scanner.js';
 import { lookupBarcode, isRetailCode } from './barcode-lookup.js';
+import { installSwipe } from './swipe.js';
 
-export const APP_VERSION = '0.8.4';
+export const APP_VERSION = '0.8.5';
 export { isLow };
 
 // ---------- utilidades ----------
@@ -244,8 +245,13 @@ async function doRender() {
   renderChrome(r);
   const key = r.name + '/' + (r.arg || '');
   const changed = key !== lastRoute; lastRoute = key;
-  main().classList.toggle('enter', false);
-  if (changed) { void main().offsetWidth; main().classList.add('enter'); window.scrollTo(0, 0); }
+  ANIM.forEach(c => main().classList.toggle(c, false));
+  if (changed) {
+    void main().offsetWidth; main().classList.add('enter');
+    if (swipeDir) main().classList.add(swipeDir === 'left' ? 'from-right' : 'from-left');
+    window.scrollTo(0, 0);
+  }
+  swipeDir = '';
   switch (r.name) {
     case 'novo': return viewForm(null);
     case 'editar': return viewForm(r.arg);
@@ -259,6 +265,37 @@ async function doRender() {
     case 'ajustes': return viewSettings();
     default: return viewDashboard();
   }
+}
+
+// ---------- deslizar para os lados ----------
+// esquerda = próxima aba; direita = voltar (telas de detalhe) ou aba anterior
+let swipeDir = '';
+function swipeNav(dir) {
+  if (!S.profile) return;
+  if (dir === 'right') {
+    const back = $('#main a.back');
+    if (back) return leaveTo(back.getAttribute('href'), 'right');
+  }
+  const tabs = $$('#tabs a[data-tab]:not(.disabled)').map(a => a.dataset.tab);
+  const i = tabs.indexOf($('#tabs a.on')?.dataset.tab);
+  if (i < 0) return;
+  // numa tela de detalhe (produto, pedido, preços…) conta a aba a que ela pertence
+  const j = i + (dir === 'left' ? 1 : -1);
+  if (j < 0 || j >= tabs.length) return nudge(dir);
+  leaveTo('#' + tabs[j], dir);
+}
+function leaveTo(hash, dir) {
+  // formulário com alterações não salvas: pergunta antes de sair
+  const f = $('#main form#f');
+  if (f && f.dataset.dirty && !confirm('Sair sem salvar as alterações?')) return;
+  swipeDir = dir;
+  go(hash);
+}
+const ANIM = ['enter', 'from-left', 'from-right', 'nudge-left', 'nudge-right'];
+function nudge(dir) {
+  const m = main();
+  ANIM.forEach(c => m.classList.toggle(c, false)); void m.offsetWidth;
+  m.classList.add('nudge-' + dir);
 }
 
 function history_replace(hash) {
@@ -1615,6 +1652,9 @@ document.documentElement.style.setProperty('--tap-deep', tapURI(15, 'deep'));
 document.documentElement.style.setProperty('--tap-deephi', tapURI(15, 'deephi'));
 try { startAmbient(); } catch (e) { console.warn('fundo', e); }
 window.addEventListener('hashchange', render);
+installSwipe({ onSwipe: swipeNav, surface: main() });
+// marca o formulário como alterado (para perguntar antes de sair deslizando)
+['input', 'change'].forEach(ev => main().addEventListener(ev, e => { const f = e.target.closest?.('form#f'); if (f) f.dataset.dirty = '1'; }));
 // reavalia o bloqueio quando o app volta para a tela (ex.: virou o dia)
 document.addEventListener('visibilitychange', () => { if (!document.hidden) render(); });
 setInterval(() => { if (!document.hidden) renderChromeOnly(); }, 60_000);

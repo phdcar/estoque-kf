@@ -746,6 +746,70 @@ try {
     }
   });
 
+  await step('deslizar o dedo para os lados troca de tela em todas as telas', async () => {
+    await op.setViewportSize({ width: 412, height: 839 });
+    const cdp = await op.context().newCDPSession(op);
+    // gesto de toque real (touchstart/move/end), como o dedo no celular
+    const swipe = async (x0, y0, x1, y1, ms = 250) => {
+      const pt = (x, y) => [{ x, y, id: 1 }];
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: pt(x0, y0) });
+      for (let k = 1; k <= 6; k++) {
+        await op.waitForTimeout(ms / 6);
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: pt(x0 + (x1 - x0) * k / 6, y0 + (y1 - y0) * k / 6) });
+      }
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await op.waitForTimeout(150);
+      await op.evaluate(() => window.__app.idle());
+    };
+    const left = (y = 420) => swipe(320, y, 110, y + 10);
+    const right = (y = 420) => swipe(110, y, 320, y + 10);
+    const hash = () => op.evaluate(() => location.hash);
+    const id = fake.tables.produtos.find(p => p.nome === 'Álcool 70% 1L').id;
+
+    // abas principais, da primeira à última e de volta
+    await nav(op, '#painel');
+    const order = ['#estoque', '#conferencia', '#historico', '#ajustes'];
+    for (const h of order) { await left(); assert.equal(await hash(), h, 'esquerda deveria ir para ' + h); }
+    await left(); assert.equal(await hash(), '#ajustes', 'última aba: fica onde está');
+    for (const h of ['#historico', '#conferencia', '#estoque', '#painel']) { await right(); assert.equal(await hash(), h, 'direita deveria ir para ' + h); }
+    await right(); assert.equal(await hash(), '#painel', 'primeira aba: fica onde está');
+
+    // telas de detalhe: direita volta, esquerda vai para a aba seguinte
+    await nav(op, '#produto/' + id); await right(); assert.equal(await hash(), '#estoque');
+    await nav(op, '#produto/' + id); await left(); assert.equal(await hash(), '#conferencia');
+    await nav(op, '#precos'); await right(700); assert.equal(await hash(), '#historico');
+    await nav(op, '#estoque/alerta'); await left(700); assert.equal(await hash(), '#conferencia');
+    // formulário com alteração pergunta antes de sair (o teste aceita a pergunta)
+    await nav(op, '#editar/' + id);
+    await op.fill('#nm', 'Álcool 70% 1L teste');
+    await op.evaluate(() => document.activeElement.blur());
+    let asked = '';
+    const onDlg = d => { asked = d.message(); };
+    op.on('dialog', onDlg);
+    await right(300);
+    op.off('dialog', onDlg);
+    assert.match(asked, /Sair sem salvar/);
+    assert.equal(await hash(), '#produto/' + id);
+    assert.equal(fake.tables.produtos.find(p => p.id === id).nome, 'Álcool 70% 1L', 'não salvou nada');
+
+    // o que NÃO pode trocar de tela
+    await nav(op, '#estoque');
+    const chips = await op.locator('#filters').boundingBox();
+    await swipe(300, chips.y + chips.height / 2, 120, chips.y + chips.height / 2);
+    assert.equal(await hash(), '#estoque', 'filtros que rolam de lado não trocam de tela');
+    await op.focus('#q');
+    const q = await op.locator('#q').boundingBox();
+    await swipe(q.x + q.width - 20, q.y + q.height / 2, q.x + 20, q.y + q.height / 2);
+    assert.equal(await hash(), '#estoque', 'arrastar dentro do campo de busca não troca de tela');
+    await swipe(200, 600, 230, 250);
+    assert.equal(await hash(), '#estoque', 'rolar para cima/baixo não troca de tela');
+    await swipe(8, 420, 300, 420);
+    assert.equal(await hash(), '#estoque', 'no navegador, a borda fica para o gesto de voltar do sistema');
+    await swipe(300, 700, 260, 700);
+    assert.equal(await hash(), '#estoque', 'gesto curto não troca de tela');
+    await cdp.detach();
+  });
+
   await step('aviso do radar: 2 segundas-feiras sem conferir fica vermelho', async () => {
     const before = await op.evaluate(() => Date.now());
     await setTime(op, '2026-12-14T19:00:00-03:00'); // segunda depois do prazo; perdidas 07/12 e 14/12
