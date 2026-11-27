@@ -330,6 +330,9 @@ try {
     await page.click('#jsend');
     await page.getByText('Hoje não é dia de conferência').waitFor();
     assert.equal(await page.$('nav a.disabled'), null);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: path.join(SHOTS, 'qa', 'conferencia-semanal.png') });
     // contagem extra (opcional fora da segunda)
     await page.click('#extra');
     await page.waitForSelector('#clist');
