@@ -263,11 +263,27 @@ try {
     await nav(page, '#estoque');
     assert.equal(await page.$('nav a.disabled'), null);
     await nav(page, '#conferencia');
-    await page.getByText('cadastrados hoje').waitFor();
+    await page.getByText('A primeira conferência será em 30/11/2026 (segunda-feira).').waitFor(); // quinta: a primeira é na segunda 30/11
   });
 
-  await step('27/11 (sexta), dia útil: bloqueia as outras telas até contar', async () => {
+  await step('27/11 (sexta): não é dia de conferência, não bloqueia', async () => {
     await setTime(page, '2026-11-27T08:00:00-03:00');
+    await nav(page, '#estoque');
+    await page.waitForSelector('#plist');
+    assert.equal(await page.$('nav a.disabled'), null);
+    await nav(page, '#conferencia');
+    await page.getByText('A primeira conferência será em 30/11/2026 (segunda-feira).').waitFor();
+  });
+
+  await step('28/11 (sábado): sem conferência obrigatória', async () => {
+    await setTime(page, '2026-11-28T09:00:00-03:00');
+    await nav(page, '#estoque');
+    await page.waitForSelector('#plist');
+    assert.equal(await page.$('nav a.disabled'), null);
+  });
+
+  await step('30/11 (segunda): bloqueia as outras telas até contar', async () => {
+    await setTime(page, '2026-11-30T08:00:00-03:00');
     await nav(page, '#estoque');
     await waitHash(page, '#conferencia');
     await page.getByText('Conte todos os produtos para liberar o app.').waitFor();
@@ -283,7 +299,7 @@ try {
     await shot(page, '05-conferencia-bloqueada');
   });
 
-  await step('rascunho da contagem sobrevive a fechar o app; só conclui com tudo contado', async () => {
+  await step('rascunho da contagem sobrevive a fechar o app', async () => {
     const ci = name => page.locator('#clist li', { hasText: name }).locator('input');
     await ci('Álcool').fill('2');
     await ci('Gaze').fill('18');
@@ -293,29 +309,6 @@ try {
     assert.equal(await ci('Álcool').inputValue(), '2');
     assert.equal(await ci('Gaze').inputValue(), '18');
     assert.equal(await page.textContent('#done-n'), '2');
-    await ci('Luva').fill('10');
-    assert.equal(await page.isDisabled('#finish'), false);
-    await page.click('#finish');
-    await page.waitForFunction(() => location.hash === '#estoque');
-    await page.evaluate(() => window.__app.idle());
-    assert.equal(await page.$('nav a.disabled'), null);
-    const q = await page.$$eval('li.prod', els => Object.fromEntries(els.map(e => [e.querySelector('.name').textContent, e.querySelector('.n').textContent])));
-    assert.deepEqual(q, { 'Álcool 70% 1L': '2', 'Gaze estéril': '18', 'Luva de procedimento M': '10' });
-  });
-
-  await step('após concluir, não bloqueia de novo no mesmo dia nem ao reabrir', async () => {
-    await page.reload();
-    await page.waitForSelector('#plist');
-    assert.ok(!page.url().includes('conferencia'));
-  });
-
-  await step('28/11 (sábado): fim de semana, sem conferência obrigatória', async () => {
-    await setTime(page, '2026-11-28T09:00:00-03:00');
-    await nav(page, '#estoque');
-    await page.waitForSelector('#plist');
-    assert.equal(await page.$('nav a.disabled'), null);
-    await nav(page, '#conferencia');
-    await page.getByText('Hoje é fim de semana: não há conferência obrigatória.').waitFor();
   });
 
   await step('30/11 às 19h sem conferência: ATRASADA e bloqueado', async () => {
@@ -324,7 +317,7 @@ try {
     await page.getByText('Conferência atrasada: o prazo de hoje (18:00) já passou.').waitFor();
   });
 
-  await step('01/12: dia útil perdido exige justificativa antes da contagem', async () => {
+  await step('01/12 (terça): segunda-feira perdida exige justificativa; depois a contagem é opcional', async () => {
     await setTime(page, '2026-12-01T08:00:00-03:00');
     await waitHash(page, '#conferencia');
     await page.waitForSelector('#jt');
@@ -335,10 +328,25 @@ try {
     await page.fill('#jt', 'Faltei por motivo de saúde.');
     await shot(page, '16-justificativa');
     await page.click('#jsend');
+    await page.getByText('Hoje não é dia de conferência').waitFor();
+    assert.equal(await page.$('nav a.disabled'), null);
+    // contagem extra (opcional fora da segunda)
+    await page.click('#extra');
     await page.waitForSelector('#clist');
-    for (const [n, v] of [['Álcool', 2], ['Gaze', 18], ['Luva', 9]]) await page.locator('#clist li', { hasText: n }).locator('input').fill(String(v));
+    const ci = name => page.locator('#clist li', { hasText: name }).locator('input');
+    for (const [n, v] of [['Álcool', 2], ['Gaze', 18], ['Luva', 9]]) await ci(n).fill(String(v));
+    assert.equal(await page.isDisabled('#finish'), false);
     await page.click('#finish');
     await waitHash(page, '#estoque');
+    await page.evaluate(() => window.__app.idle());
+    const q = await page.$$eval('li.prod', els => Object.fromEntries(els.map(e => [e.querySelector('.name').textContent, e.querySelector('.n').textContent])));
+    assert.deepEqual(q, { 'Álcool 70% 1L': '2', 'Gaze estéril': '18', 'Luva de procedimento M': '9' });
+  });
+
+  await step('após concluir, não bloqueia de novo ao reabrir', async () => {
+    await page.reload();
+    await page.waitForSelector('#plist');
+    assert.ok(!page.url().includes('conferencia'));
   });
 
   await step('produtos, fotos e quantidades do funcionário chegam no celular do dono', async () => {
@@ -416,7 +424,7 @@ try {
     await op.fill('#dl', '07:00');
     await op.click('#fs button');
     await synced(op);
-    await setTime(page, '2026-12-02T08:00:00-03:00'); // dia de conferência, já passou das 07:00
+    await setTime(page, '2026-12-07T08:00:00-03:00'); // segunda-feira, já passou das 07:00
     await synced(page);
     await page.evaluate(() => window.__app.render());
     await waitHash(page, '#conferencia');
@@ -430,13 +438,11 @@ try {
     await nav(page, '#historico');
     await page.waitForSelector('table.hist');
     const rows = await page.$$eval('table.hist:first-of-type tbody tr', trs => trs.map(tr => [...tr.children].map(td => td.innerText.replace(/\s+/g, ' ').trim())));
-    assert.equal(rows[0][0].startsWith('01/12/2026'), true);
-    assert.match(rows[0][1], /^Feita Bruna 01\/12\/2026/);
-    assert.equal(rows[1][0].startsWith('30/11/2026'), true);
-    assert.match(rows[1][1], /^Justificada Bruna: “Faltei por motivo de saúde.”/);
-    assert.equal(rows[2][0].startsWith('27/11/2026'), true);
-    assert.match(rows[2][1], /^Feita Bruna 27\/11\/2026/);
-    assert.equal(rows[3][1], 'Sem cobrança (produtos novos)');
+    // uma linha por segunda-feira desde o início (26/11): só 30/11
+    assert.equal(rows.filter(r => r[0]).length, 1);
+    assert.equal(rows[0][0].startsWith('30/11/2026'), true);
+    assert.match(rows[0][1], /^Justificada Bruna: “Faltei por motivo de saúde.”/);
+    assert.ok(fake.tables.conferencias.some(c => !c.justificativa && c.dia === '2026-12-01'), 'contagem extra de 01/12 chegou');
     const j = fake.tables.conferencias.find(c => c.justificativa);
     assert.deepEqual([j.justificativa, j.dias], ['Faltei por motivo de saúde.', ['2026-11-30']]);
     await page.click('summary');
@@ -444,7 +450,7 @@ try {
   });
 
   await step('dono vê aviso de conferência atrasada e nunca é bloqueado', async () => {
-    await setTime(op, '2026-12-02T09:00:00-03:00');
+    await setTime(op, '2026-12-07T09:00:00-03:00'); // segunda, depois do prazo (07:00)
     await synced(op);
     await nav(op, '#estoque');
     assert.ok(op.url().includes('#estoque'));
@@ -478,7 +484,7 @@ try {
     assert.equal(await op.locator('#alist li.prod .ping').count(), 1);
     assert.match(await op.textContent('#shop'), /Mercado Livre.*Agulha 31G.*comprar 2/s);
     await op.waitForFunction(() => document.querySelectorAll('.radar .blip').length >= 1);
-    assert.match(await op.textContent('.radar-card .since'), /dia útil sem conferir o estoque|Estoque conferido hoje|Conferência de hoje pendente/);
+    assert.match(await op.textContent('.radar-card .since'), /segunda-feira sem conferir o estoque|Estoque conferido hoje|Conferência de hoje pendente|Próxima conferência/);
     console.log('       aviso do radar:', (await op.textContent('.radar-card .since')).replace(/\s+/g, ' ').trim());
     await shot(op, '11-painel-radar');
     await nav(op, '#estoque/alerta');
@@ -737,12 +743,13 @@ try {
     }
   });
 
-  await step('aviso do radar: 3 dias úteis sem conferir fica vermelho', async () => {
+  await step('aviso do radar: 2 segundas-feiras sem conferir fica vermelho', async () => {
     const before = await op.evaluate(() => Date.now());
-    await setTime(op, '2026-12-04T19:00:00-03:00'); // sexta depois do prazo; última contagem 01/12 (terça)
+    await setTime(op, '2026-12-14T19:00:00-03:00'); // segunda depois do prazo; perdidas 07/12 e 14/12
     await nav(op, '#painel');
     await op.waitForFunction(() => document.querySelector('.since')?.classList.contains('red'));
-    assert.match(await op.textContent('.since .n'), /^3$/);
+    assert.match(await op.textContent('.since .n'), /^2$/);
+    assert.match(await op.textContent('.since'), /segundas-feiras sem conferir o estoque/);
     const lu = fake.tables.produtos.find(p => p.nome === 'Agulha 31G');
     await nav(op, '#produto/' + lu.id);
     console.log('       consumo (Agulha 31G):', (await op.textContent('.stats')).replace(/\s+/g, ' ').trim().slice(0, 160));

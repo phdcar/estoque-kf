@@ -1,6 +1,6 @@
 import { db } from './db.js';
 import { processPhoto } from './lineart.js';
-import { ymd, countStatus, history, isWeekday, sinceLastCount } from './schedule.js';
+import { ymd, countStatus, history, isCountWeekday, sinceLastCount } from './schedule.js';
 import { level, isLow, missing, need, shoppingList, shoppingText, itemNote, FORECAST_HORIZON, ORDER_COVER, summary, buy, sentenceCase, searchProducts, fold, expiryLevel, expiryText, daysToExpiry, EXPIRY_SOON, NO_EXPIRY } from './stock.js';
 import { illustrationFor, SKETCH_FILTER } from './illustrations.js';
 import { I } from './icons.js';
@@ -11,7 +11,7 @@ import { consumption, forecastDays, suggestLevels, rateText, forecastText, withQ
 import { scanBarcode } from './scanner.js';
 import { lookupBarcode, isRetailCode } from './barcode-lookup.js';
 
-export const APP_VERSION = '0.8.2';
+export const APP_VERSION = '0.8.3';
 export { isLow };
 
 // ---------- utilidades ----------
@@ -476,15 +476,15 @@ function radarSvg(products) {
   </svg>`;
 }
 
-// aviso em cima do radar: conferido hoje ou há quantos dias úteis não se confere
+// aviso em cima do radar: conferido hoje ou quantas segundas-feiras ficaram sem conferência
 function sinceStrip() {
   if (!S.products.length) return '';
   const st = sinceLastCount({ now: now(), counts: S.counts, deadline: S.schedule?.deadline });
   const lastTxt = l => `Última conferência: ${cap(weekday(l.date))}, ${fmtDay(l.date).slice(0, 5)} · ${esc(l.by)}`;
   if (!st.last) return `<div class="since amber"><span class="ic">${I.alert}</span><div><strong>Estoque ainda não foi conferido</strong><small>A primeira conferência aparece aqui.</small></div></div>`;
   if (st.today) return `<div class="since ok"><span class="ic">${I.ok}</span><div><strong>Estoque conferido hoje</strong><small>${fmtTime(st.last.at)} · ${esc(st.last.by)}</small></div></div>`;
-  if (!st.days) return `<div class="since gold"><span class="ic">${I.clock}</span><div><strong>${st.pendingToday ? 'Conferência de hoje pendente' : 'Fim de semana, sem conferência'}</strong><small>${lastTxt(st.last)}</small></div></div>`;
-  return `<div class="since ${st.days >= 2 ? 'red' : 'amber'}"><b class="n">${st.days}</b><div><strong>${st.days === 1 ? 'dia útil' : 'dias úteis'} sem conferir o estoque</strong><small>${lastTxt(st.last)}</small></div></div>`;
+  if (!st.days) return `<div class="since gold"><span class="ic">${I.clock}</span><div><strong>${st.pendingToday ? 'Conferência de hoje pendente' : `Próxima conferência: segunda-feira, ${fmtDay(status().next || ymd(now())).slice(0, 5)}`}</strong><small>${lastTxt(st.last)}</small></div></div>`;
+  return `<div class="since ${st.days >= 2 ? 'red' : 'amber'}"><b class="n">${st.days}</b><div><strong>${st.days === 1 ? 'segunda-feira' : 'segundas-feiras'} sem conferir o estoque</strong><small>${lastTxt(st.last)}</small></div></div>`;
 }
 
 // ---------- tela: painel (radar) ----------
@@ -1138,7 +1138,7 @@ function saveDraft(d) { try { localStorage.setItem(draftKey(), JSON.stringify(d)
 
 async function viewJustify(st) {
   main().innerHTML = `
-    <div class="banner lock">${I.lock}<span><b>Conferência não feita.</b> A contagem é diária, de segunda a sexta. Explique o motivo para liberar o app.</span></div>
+    <div class="banner lock">${I.lock}<span><b>Conferência não feita.</b> A contagem é toda segunda-feira. Explique o motivo para liberar o app.</span></div>
     <div class="eyebrow">Conferência</div>
     <h2>Justificativa</h2>
     <div class="card">
@@ -1170,10 +1170,10 @@ async function viewCount(forceStart) {
     const today = ymd(now());
     let msg;
     if (st.state === 'sem-produtos') msg = 'Cadastre produtos para começar as conferências.';
-    else if (st.state === 'primeiro-dia') msg = 'Os produtos foram cadastrados hoje. A conferência obrigatória começa no próximo dia útil.';
+    else if (st.state === 'primeiro-dia') msg = 'Os produtos foram cadastrados hoje. A conferência obrigatória começa na próxima segunda-feira.';
     else if (st.state === 'nao-iniciada') msg = `A primeira conferência será em ${fmtDay(st.next)} (${weekday(st.next)}).`;
-    else if (st.state === 'fim-de-semana') msg = 'Hoje é fim de semana: não há conferência obrigatória.';
-    else if (st.missing?.length) msg = `Conferência de hoje feita. Ainda falta a justificativa de ${plural(st.missing.length, 'dia', 'dias')} sem conferência.`;
+    else if (st.state === 'fim-de-semana') msg = `Hoje não é dia de conferência. A contagem é toda segunda-feira; a próxima é em ${fmtDay(st.next)}.`;
+    else if (st.missing?.length) msg = `Conferência de hoje feita. Ainda falta a justificativa de ${plural(st.missing.length, 'segunda-feira', 'segundas-feiras')} sem conferência.`;
     else msg = `Conferência de hoje feita por <b>${esc(st.count.by)}</b> em ${fmtDateTime(st.count.at)}.`;
     main().innerHTML = `
       <div class="eyebrow">Conferência</div>
@@ -1181,7 +1181,7 @@ async function viewCount(forceStart) {
       <div class="banner green">${I.ok}<span>${msg}</span></div>
       <div class="card">
         <p style="margin-top:0">Próxima conferência: <b>${fmtDay(st.next)}</b> (${weekday(st.next)}).</p>
-        <p class="small muted" style="margin-bottom:0">A conferência é diária, de segunda a sexta-feira. Dia útil sem conferência precisa de justificativa.${isWeekday(today) ? '' : ' Hoje não é dia útil.'}</p>
+        <p class="small muted" style="margin-bottom:0">A conferência é semanal, toda segunda-feira. Segunda-feira sem conferência precisa de justificativa.${isCountWeekday(today) ? '' : ' Fora da segunda, a contagem é opcional.'}</p>
       </div>
       ${products.length ? `<button class="block secondary" id="extra">Fazer uma contagem extra agora</button>` : ''}`;
     const ex = $('#extra');
@@ -1199,7 +1199,7 @@ async function viewCount(forceStart) {
         </li>`; };
   const split = plan.first.length && plan.later.length;
   main().innerHTML = `
-    ${st.locked && !isOwner() ? `<div class="banner lock">${I.lock}<span><b>Conferência diária.</b> Conte todos os produtos para liberar o app.</span></div>` : ''}
+    ${st.locked && !isOwner() ? `<div class="banner lock">${I.lock}<span><b>Conferência de segunda-feira.</b> Conte todos os produtos para liberar o app.</span></div>` : ''}
     ${st.state === 'atrasada' ? `<div class="banner red">${I.alert}<span>Conferência atrasada: o prazo de hoje (${esc(S.schedule?.deadline || '18:00')}) já passou.</span></div>` : ''}
     <div class="eyebrow">Conferência</div>
     <h2>Contagem do estoque</h2>
@@ -1314,7 +1314,7 @@ async function viewHistory() {
       <div class="kcard"><span>${I.money}Valor em estoque hoje</span><b>${brl(sv.value)}</b><small>${sv.missing ? `${plural(sv.missing, 'produto', 'produtos')} sem preço` : '<a href="#precos" id="go-prices">Todos com preço · revisar</a>'}</small></div>
       <div class="kcard"><span>${I.cart}Gasto no mês</span><b>${brl(ms.spend)}</b><small>Entradas de mercadoria</small></div>
       <div class="kcard ${ms.losses ? 'bad' : ''}"><span>${I.trash}Perdas (vencidos)</span><b>${brl(ms.losses)}</b><small>${plural(ms.lossUnits, 'unidade descartada', 'unidades descartadas')}</small></div>
-      <div class="kcard ${cNao ? 'bad' : ''}"><span>${I.check}Conferências</span><b>${cFeitas} de ${mrows.length}</b><small>dias úteis${cJust ? ` · ${cJust} justificado${cJust > 1 ? 's' : ''}` : ''}${cNao ? ` · ${cNao} sem justificativa` : ''}</small></div>
+      <div class="kcard ${cNao ? 'bad' : ''}"><span>${I.check}Conferências</span><b>${cFeitas} de ${mrows.length}</b><small>segundas-feiras${cJust ? ` · ${cJust} justificado${cJust > 1 ? 's' : ''}` : ''}${cNao ? ` · ${cNao} sem justificativa` : ''}</small></div>
     </div>
     ${sv.missing ? `<a class="btn secondary block fill-prices" href="#precos" id="fill-prices">${I.money}Preencher preços (${sv.missing} faltando)</a>` : ''}
     ${ms.bySupplier.length ? `<h3>Gasto por fornecedor</h3><div class="card bars">${ms.bySupplier.map(x => `<div class="br"><div class="t"><span>${esc(x.supplier)}</span><b>${brl(x.value)}</b></div>
@@ -1330,8 +1330,8 @@ async function viewHistory() {
       <p class="small muted hidden" id="pdf-st" style="margin-bottom:0"></p>
     </div>
     <h2 style="margin-top:44px">Conferências</h2>
-    <div class="card small">Conferência diária, de segunda a sexta-feira, desde ${S.schedule ? fmtDay(S.schedule.startDate) : '—'}. Prazo: ${esc(S.schedule?.deadline || '18:00')}. Dia útil sem conferência precisa de justificativa.</div>
-    <h3>Por dia útil</h3>
+    <div class="card small">Conferência semanal, toda segunda-feira, desde ${S.schedule ? fmtDay(S.schedule.startDate) : '—'}. Prazo: ${esc(S.schedule?.deadline || '18:00')}. Segunda-feira sem conferência precisa de justificativa.</div>
+    <h3>Por segunda-feira</h3>
     ${rows.length ? `<div class="card" style="padding:4px 12px"><table class="hist days"><tbody>
       ${rows.map(r => `<tr><td>${fmtDay(r.day)}<br><span class="muted small">${cap(weekday(r.day))}</span></td>
         <td><b class="st ${label[r.state][1]}">${label[r.state][0]}</b><br><span class="who-when">${r.count ? `${esc(r.count.by)}<br><span class="muted small">${fmtDateTime(r.count.at)}</span>`
@@ -1467,10 +1467,10 @@ async function viewSettings() {
       <form id="fs">
         <label for="sd" style="margin-top:0">Primeiro dia de conferência</label>
         <input id="sd" type="date" value="${esc(S.schedule?.startDate || ymd(now()))}">
-        <div class="hint">A partir desse dia, a conferência é diária, de segunda a sexta-feira.</div>
+        <div class="hint">A partir desse dia, a conferência é toda segunda-feira.</div>
         <label for="dl">Horário limite</label>
         <input id="dl" type="time" value="${esc(S.schedule?.deadline || '18:00')}">
-        <div class="hint">Passado esse horário sem conferência, ela aparece como atrasada. Dia útil que terminar sem conferência precisa de justificativa do funcionário.</div>
+        <div class="hint">Passado esse horário sem conferência, ela aparece como atrasada. Segunda-feira que terminar sem conferência precisa de justificativa do funcionário.</div>
         <p style="margin-bottom:0"><button class="block">Salvar conferência</button></p>
       </form>
     </div>
@@ -1478,7 +1478,7 @@ async function viewSettings() {
     <div class="card"><div id="members" class="small muted">Carregando…</div></div>` : ''}
     <h3>Notificações e número no ícone</h3>
     <div class="card small">
-      <p style="margin-top:0">${isOwner() ? 'Receba no celular um aviso a cada mudança no estoque, um resumo às 8h (dias úteis) e o lembrete da conferência às 17h. O número no ícone do app mostra quantos produtos estão abaixo do alerta (inclui os esgotados) ou vencidos, mesmo com o app fechado.' : 'Receba às 17h (dias úteis) o lembrete quando a conferência do dia ainda não foi feita. O número no ícone do app mostra quantos produtos estão abaixo do alerta ou vencidos.'}</p>
+      <p style="margin-top:0">${isOwner() ? 'Receba no celular um aviso a cada mudança no estoque, um resumo às 8h (dias úteis) e, na segunda-feira, o lembrete da conferência às 17h. O número no ícone do app mostra quantos produtos estão abaixo do alerta (inclui os esgotados) ou vencidos, mesmo com o app fechado.' : 'Receba na segunda-feira, às 17h, o lembrete quando a conferência ainda não foi feita. O número no ícone do app mostra quantos produtos estão abaixo do alerta ou vencidos.'}</p>
       <p id="push-st" class="muted">${pushStatusText()}</p>
       ${pushCanAsk() ? `<p style="margin-bottom:0"><button class="block secondary" id="push-on">Ativar notificações</button></p>` : ''}
     </div>

@@ -28,6 +28,8 @@ $P -d t -f "$DIR/../../supabase/avisos-email.sql" >/dev/null
 OUT=$($P -d t -t -A -f "$DIR/rls_test.sql" 2>&1) || { echo "$OUT"; exit 1; }
 $P -d t -f "$DIR/../../supabase/migracao-0.8.sql" >/dev/null
 $P -d t -f "$DIR/../../supabase/migracao-0.8.sql" >/dev/null   # rodar 2x não pode dar erro
+$P -d t -f "$DIR/../../supabase/migracao-0.8.3.sql" >/dev/null
+$P -d t -f "$DIR/../../supabase/migracao-0.8.3.sql" >/dev/null
 OUT2=$($P -d t -t -A -f "$DIR/avisos_test.sql" 2>&1) || { echo "$OUT"; echo "$OUT2"; exit 1; }
 OUT3=$($P -d t -t -A -f "$DIR/v08_test.sql" 2>&1) || { echo "$OUT"; echo "$OUT2"; echo "$OUT3"; exit 1; }
 OUT2="$OUT2
