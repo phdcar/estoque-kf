@@ -469,6 +469,16 @@ button, .btn { border-radius: 16px; }
 /* entrada da tela: os blocos sobem e aparecem um após o outro */
 @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 main.enter > * { animation: rise .6s var(--ease) both; }
+/* troca de tela deslizando o dedo: entra pelo lado do gesto */
+@keyframes fromR { from { opacity: 0; transform: translateX(36px); } to { opacity: 1; transform: none; } }
+@keyframes fromL { from { opacity: 0; transform: translateX(-36px); } to { opacity: 1; transform: none; } }
+main.enter.from-right > * { animation-name: fromR; animation-duration: .4s; }
+main.enter.from-left > * { animation-name: fromL; animation-duration: .4s; }
+/* primeira ou última aba: um pequeno tranco mostra que não há mais telas para aquele lado */
+@keyframes nudgeL { 30% { transform: translateX(-14px); } 100% { transform: none; } }
+@keyframes nudgeR { 30% { transform: translateX(14px); } 100% { transform: none; } }
+main.nudge-left { animation: nudgeL .3s ease; }
+main.nudge-right { animation: nudgeR .3s ease; }
 main.enter > *:nth-child(2) { animation-delay: .05s; } main.enter > *:nth-child(3) { animation-delay: .1s; }
 main.enter > *:nth-child(4) { animation-delay: .15s; } main.enter > *:nth-child(5) { animation-delay: .2s; }
 main.enter > *:nth-child(6) { animation-delay: .25s; } main.enter > *:nth-child(n+7) { animation-delay: .3s; }
@@ -482,7 +492,7 @@ nav.tabs a.on::before { display: none; }
 nav.tabs a svg { position: relative; }
 
 @media (prefers-reduced-motion: reduce) {
-  main.enter > * { animation: none; }
+  main.enter > *, main.enter.from-left > *, main.enter.from-right > *, main.nudge-left, main.nudge-right { animation: none; }
 }
 
 /* =====================================================================
