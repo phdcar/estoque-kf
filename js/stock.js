@@ -37,28 +37,43 @@ export const need = p => Math.max(0, Number(p.min) - Number(p.quantity));
 // quanto comprar: até o estoque ideal, quando ele existe; senão, até o mínimo
 export const buy = p => Math.max(need(p), Number(p.ideal) >= 1 ? Number(p.ideal) - Number(p.quantity) : 0);
 
-// lista de compras agrupada por fornecedor (só produtos abaixo do mínimo)
-export function shoppingList(products) {
+// lista de compras agrupada por fornecedor.
+// Entra o que está abaixo do mínimo e, com previsão (versão 0.8), o que vai acabar em até `horizon` dias
+// no ritmo de uso atual. Com consumo conhecido, a quantidade sugerida cobre `cover` dias de uso.
+// forecast(p) -> { days, perDay } ou null (sem histórico suficiente).
+export const FORECAST_HORIZON = 10;
+export const ORDER_COVER = 30;
+export function shoppingList(products, { forecast = () => null, horizon = FORECAST_HORIZON, cover = ORDER_COVER } = {}) {
   const groups = new Map();
   for (const p of products) {
-    if (!isLow(p)) continue;
+    const f = forecast(p);
+    const soon = f && f.days != null && f.days <= horizon && !(Number(p.min) >= 1 && isLow(p));
+    if (!isLow(p) && !soon) continue;
+    const byUse = f && f.perDay > 0 ? Math.ceil(f.perDay * cover) - Number(p.quantity) : 0;
+    const qty = Math.max(1, buy(p), byUse);
     const s = String(p.supplier || '').trim() || 'Sem fornecedor';
     if (!groups.has(s)) groups.set(s, []);
-    groups.get(s).push({ id: p.id, name: p.name, quantity: Number(p.quantity), min: Number(p.min), ideal: Number(p.ideal) || null, need: buy(p) });
+    groups.get(s).push({ id: p.id, name: p.name, quantity: Number(p.quantity), min: Number(p.min), ideal: Number(p.ideal) || null,
+      need: qty, days: f ? f.days : null, perDay: f ? f.perDay : null, reason: isLow(p) ? 'baixo' : 'previsao' });
   }
   const cmp = (a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' });
   return [...groups.entries()]
     .sort(([a], [b]) => (a === 'Sem fornecedor') - (b === 'Sem fornecedor') || cmp(a, b))
-    .map(([supplier, items]) => ({ supplier, items: items.sort((a, b) => cmp(a.name, b.name)) }));
+    .map(([supplier, items]) => ({ supplier, items: items.sort((a, b) => (a.reason === 'baixo' ? 0 : 1) - (b.reason === 'baixo' ? 0 : 1) || cmp(a.name, b.name)) }));
 }
+
+const itemNote = i => i.reason === 'previsao'
+  ? `tem ${i.quantity}, ${i.days <= 0 ? 'acaba hoje' : i.days === 1 ? 'acaba em ~1 dia' : `acaba em ~${i.days} dias`}`
+  : `tem ${i.quantity}, mínimo ${i.min}${i.ideal ? `, ideal ${i.ideal}` : ''}`;
+export { itemNote };
 
 // texto para enviar por WhatsApp/e-mail
 export function shoppingText(list, when = new Date()) {
   const d = when.toLocaleDateString('pt-BR');
   const lines = [`Clínica KF · Reposição de estoque · ${d}`];
   for (const g of list) {
-    lines.push('', g.supplier.toUpperCase());
-    for (const i of g.items) lines.push(`• ${i.name}: comprar ${i.need} (tem ${i.quantity}, mínimo ${i.min}${i.ideal ? `, ideal ${i.ideal}` : ''})`);
+    lines.push('', g.supplier);
+    for (const i of g.items) lines.push(`• ${i.name}: comprar ${i.need} (${itemNote(i)})`);
   }
   return lines.join('\n');
 }

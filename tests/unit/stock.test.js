@@ -82,3 +82,26 @@ test('nome só com a primeira letra maiúscula', async () => {
   assert.equal(sentenceCase('álcool 70%'), 'Álcool 70%');
 });
 
+
+test('pedido sugerido usa a previsão de consumo (versão 0.8)', () => {
+  const ps = [
+    { id: 'a', name: 'Gaze', quantity: 12, min: 5, ideal: 20, supplier: 'Dental Cremer' },      // acima do mínimo, mas acaba em 4 dias
+    { id: 'b', name: 'Luva', quantity: 50, min: 10, ideal: 60, supplier: 'Dental Cremer' },     // dura muito
+    { id: 'c', name: 'Agulha 32G 6 mm', quantity: 2, min: 30, ideal: 100, supplier: 'Mercado Livre' }, // abaixo do mínimo
+  ];
+  const fc = { a: { days: 4, perDay: 3 }, b: { days: 50, perDay: 1 }, c: { days: 1, perDay: 2 } };
+  const list = shoppingList(ps, { forecast: p => fc[p.id] });
+  assert.deepEqual(list.map(g => g.supplier), ['Dental Cremer', 'Mercado Livre']);
+  const gaze = list[0].items[0];
+  assert.equal(list[0].items.length, 1);
+  assert.equal(gaze.reason, 'previsao');
+  assert.equal(gaze.need, 3 * 30 - 12); // cobre 30 dias de uso
+  const ag = list[1].items[0];
+  assert.equal(ag.reason, 'baixo');
+  assert.equal(ag.need, 98); // até o ideal é mais que 30 dias de uso
+  const txt = shoppingText(list, new Date(2026, 10, 27));
+  assert.match(txt, /\nDental Cremer\n• Gaze: comprar 78 \(tem 12, acaba em ~4 dias\)/);
+  assert.match(txt, /• Agulha 32G 6 mm: comprar 98 \(tem 2, mínimo 30, ideal 100\)/);
+  // sem previsão, continua como antes
+  assert.equal(shoppingList(ps).flatMap(g => g.items).length, 1);
+});

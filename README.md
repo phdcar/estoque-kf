@@ -32,6 +32,15 @@ PWA (app instalável pelo navegador) de controle de estoque, em português do Br
 - Desenho esquemático de cada produto quando não há foto (`js/illustrations.js`).
 - Banco: `supabase/migracao-0.3.sql` (colunas `fornecedor` e `categoria`).
 
+## Versão 0.8: lembretes no celular e pedido sugerido pela previsão
+- Pedido sugerido por fornecedor: entra o que está abaixo do mínimo e o que vai acabar em até 10 dias no ritmo de uso;
+  com uso registrado, a quantidade cobre 30 dias (`shoppingList` em `js/stock.js`).
+- Lembrete às 17h (segunda a sexta) quando a conferência do dia não foi feita, para todos os celulares com notificações
+  ativadas (dono e funcionários); resumo às 8h para o dono quando há esgotado, abaixo do mínimo ou vencido.
+  Banco: `supabase/migracao-0.8.sql` (pg_cron). Função `kf-push` aceita `todos: true`.
+- Campo de validade logo abaixo da quantidade no cadastro; link "Alterar validade" na página do produto.
+- Categoria também fica só com a primeira letra maiúscula.
+
 ## Próxima etapa
 3. Avisos no celular do dono (Web Push).
 

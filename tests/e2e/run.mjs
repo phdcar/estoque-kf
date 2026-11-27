@@ -702,6 +702,33 @@ try {
     await setTime(op, new Date(before).toISOString());
   });
 
+  await step('pedido sugerido: produto acima do mínimo que vai acabar em breve entra na lista (previsão)', async () => {
+    // Luva: 3 saídas por dia nos últimos 14 dias; com o estoque atual, acaba em poucos dias
+    const prod = await op.evaluate(() => window.__app.S.products.find(p => p.name === 'Luva de procedimento M'));
+    const q = Math.max(Number(prod.quantity), Number(prod.min) + 1);
+    await op.evaluate(async ({ id, q }) => {
+      const { db } = await import('./js/db.js');
+      const p = await db.get('products', id);
+      const t = Date.now(), day = 864e5;
+      const per = Math.ceil(q / 4); // acaba em ~4 dias
+      await db.put('products', { ...p, quantity: q, updatedAt: new Date().toISOString(), _dirty: true });
+      for (let i = 14; i >= 1; i--) {
+        await db.put('moves', { id: crypto.randomUUID(), productId: id, name: p.name, type: 'saida', delta: -per, before: q + per, after: q,
+          price: null, supplier: p.supplier, orderId: null, note: 'teste', by: 'Teste', at: new Date(t - i * day).toISOString(), _dirty: true });
+      }
+    }, { id: prod.id, q });
+    await op.reload(); await op.waitForFunction(() => !!window.__app); await op.evaluate(() => window.__app.idle());
+    await nav(op, '#painel');
+    const shop = (await op.textContent('#shop')).replace(/\s+/g, ' ');
+    console.log('       pedido sugerido:', shop.slice(0, 260));
+    assert.match(shop, /Luva de procedimento M\s*Previsão · tem \d+ · acaba em ~[1-4] dias · uso ~[\d,]+ por dia\s*comprar \d+/);
+    assert.match(await op.textContent('.sub-lead'), /vai acabar em até 10 dias/);
+    await op.setViewportSize({ width: 390, height: 844 });
+    await op.evaluate(() => { document.querySelector('#shop').previousElementSibling.previousElementSibling.scrollIntoView({ block: 'start' }); scrollBy(0, -110); });
+    await op.waitForTimeout(500);
+    await op.screenshot({ path: path.join(SHOTS, 'qa', 'pedido-sugerido.png') });
+  });
+
   await step('dono tira o acesso do funcionário', async () => {
     await nav(op, '#ajustes');
     await op.waitForSelector('#members [data-rm]');

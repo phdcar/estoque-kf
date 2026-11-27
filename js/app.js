@@ -1,7 +1,7 @@
 import { db } from './db.js';
 import { processPhoto } from './lineart.js';
 import { ymd, countStatus, history, isWeekday, sinceLastCount } from './schedule.js';
-import { level, isLow, missing, need, shoppingList, shoppingText, summary, buy, sentenceCase, expiryLevel, expiryText, daysToExpiry, EXPIRY_SOON, NO_EXPIRY } from './stock.js';
+import { level, isLow, missing, need, shoppingList, shoppingText, itemNote, FORECAST_HORIZON, ORDER_COVER, summary, buy, sentenceCase, expiryLevel, expiryText, daysToExpiry, EXPIRY_SOON, NO_EXPIRY } from './stock.js';
 import { illustrationFor, SKETCH_FILTER } from './illustrations.js';
 import { I } from './icons.js';
 import * as cloud from './cloud.js';
@@ -10,7 +10,7 @@ import { consumption, forecastDays, suggestLevels, rateText, forecastText, withQ
   expiriesByMonth, stockValue, monthSummary, monthKey, brl, orderText, whatsappUrl, priceHistory, priceTrend, priceBySupplier, pctText, countPlan } from './insights.js';
 import { scanBarcode } from './scanner.js';
 
-export const APP_VERSION = '0.7.3';
+export const APP_VERSION = '0.8.0';
 export { isLow };
 
 // ---------- utilidades ----------
@@ -75,6 +75,7 @@ async function load() {
   S.orders = (await db.all('orders')).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   S.cons = new Map(S.products.map(p => [p.id, consumption(S.moves, p.id, now())]));
   updateBadge();
+  ensurePush();
 }
 
 // ---------- movimentos de estoque ----------
@@ -110,6 +111,24 @@ function pushStatusText() {
   if (Notification.permission === 'granted') return 'Ativado neste celular.';
   if (Notification.permission === 'denied') return 'As notificações estão bloqueadas. Libere nos ajustes do celular.';
   return 'Ainda não ativado neste celular.';
+}
+// inscreve este celular no push (dono e funcionários) e guarda no banco
+async function pushSubscribe() {
+  const reg = await navigator.serviceWorker.ready;
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uBytes(await cloud.pushKey()) });
+  await cloud.pushSave(sub);
+  return sub;
+}
+// permissão já dada (ex.: funcionário que só tinha o número no ícone): inscreve sem perguntar, uma vez por abertura
+let pushChecked = false;
+function ensurePush() {
+  if (pushChecked || !S.profile || !navigator.onLine) return;
+  pushChecked = true;
+  try {
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted' || !('PushManager' in window) || !('serviceWorker' in navigator)) return;
+    pushSubscribe().catch(() => { pushChecked = false; });
+  } catch { /* sem suporte */ }
 }
 const badgeCount = () => S.products.filter(p => isLow(p) || expiryLevel(p, now()) === 'vencido').length;
 function updateBadge() {
@@ -384,6 +403,13 @@ function expPill(p) {
   return `<span class="pill exp ${EXP_TONE[e]}" title="Validade ${fmtDay(p.expiry)}">${I.clock || ''}${expiryText(p, now())}</span>`;
 }
 
+// previsão para a lista de compras: dias até acabar e consumo por dia (null sem histórico suficiente)
+function forecastOf(p) {
+  const c = S.cons.get(p.id);
+  const d = forecastDays(p, c);
+  return d == null ? null : { days: d, perDay: c.perDay };
+}
+
 function fcPill(p) {
   const d = forecastDays(p, S.cons.get(p.id));
   if (d == null || d > 21) return '';
@@ -466,7 +492,7 @@ async function viewDashboard() {
   const alerts = S.products.filter(isLow).sort((a, b) => (a.quantity - a.min) - (b.quantity - b.min) || byName(a, b));
   const atn = S.products.filter(p => level(p) === 'atencao').sort(byName);
   const inc = S.products.filter(p => missing(p).length).sort(byName);
-  const list = shoppingList(S.products);
+  const list = shoppingList(S.products, { forecast: forecastOf });
   const openOrders = S.orders.filter(o => o.status === 'feito');
   const months = expiriesByMonth(S.products, now(), 6);
   const h = now().getHours();
@@ -504,12 +530,13 @@ async function viewDashboard() {
     ${exp.length ? `<h3>Validade · vencidos e a vencer (${exp.length})</h3><ul class="list" id="elist">${exp.map(prodRow).join('')}</ul>` : ''}
 
     ${list.length ? `
-    <h3>Reposição por fornecedor</h3>
+    <h3>Pedido sugerido por fornecedor</h3>
+    <p class="small muted sub-lead">Entra o que está abaixo do mínimo e o que vai acabar em até ${FORECAST_HORIZON} dias no ritmo de uso. Com uso registrado, a quantidade cobre ${ORDER_COVER} dias.</p>
     <div class="card" id="shop">
       ${list.map(g => `
         <div class="supplier">
           <div class="hd"><b>${esc(g.supplier)}</b><span class="small muted">${plural(g.items.length, 'item', 'itens')}</span></div>
-          ${g.items.map(i => `<a class="it" href="#produto/${i.id}"><span>${esc(i.name)}<small>tem ${i.quantity} · mínimo ${i.min}</small></span><span class="q">comprar ${i.need}</span></a>`).join('')}
+          ${g.items.map(i => `<a class="it" href="#produto/${i.id}"><span>${esc(i.name)}<small>${i.reason === 'previsao' ? `<b class="fc">Previsão</b> · ${itemNote(i).replace(/, /g, ' · ')}` : cap(itemNote(i)).replace(/, /g, ' · ')}${i.perDay ? ` · uso ${rateText(i.perDay)}` : ''}</small></span><span class="q">comprar ${i.need}</span></a>`).join('')}
           ${(() => { const o = S.orders.find(x => x.status === 'feito' && x.supplier === g.supplier);
             return o ? `<a class="order-tag" href="#pedido/${o.id}">${I.cart}Pedido feito em ${fmtDay(ymd(new Date(o.createdAt))).slice(0, 5)} · ver pedido</a>`
               : `<div class="sup-actions"><a class="btn secondary small-btn" target="_blank" rel="noopener" href="${whatsappUrl(orderText(g.supplier, g.items.map(i => ({ qty: i.need, name: i.name })), now()))}">${I.chat}WhatsApp</a>
@@ -832,7 +859,7 @@ async function viewProduct(id) {
       <div><span>Categoria</span><b class="${p.category ? 'sm' : 'miss'}">${p.category ? esc(p.category) : 'Não informada'}</b></div>
       <div><span>Preço unitário</span><b class="sm ${p.price != null ? '' : 'muted'}">${p.price != null ? brl(p.price) : 'Não informado'}</b>${trendHtml(p)}</div>
       <div><span>Valor em estoque</span><b class="sm ${p.price != null ? '' : 'muted'}">${p.price != null ? brl(p.price * p.quantity) : '—'}</b></div>
-      <div class="wide"><span>Validade</span><b id="f-vl" class="sm ${!p.expiry ? 'miss' : ''} ${{ vencido: 'red', 'vence-logo': 'amber' }[expiryLevel(p, now())] || ''}">${p.expiry === NO_EXPIRY ? 'ND · sem validade' : p.expiry ? `${fmtDay(p.expiry)} <small>· ${expiryText(p, now())}</small>` : 'Não informada'}</b></div>
+      <div class="wide"><span>Validade</span><b id="f-vl" class="sm ${!p.expiry ? 'miss' : ''} ${{ vencido: 'red', 'vence-logo': 'amber' }[expiryLevel(p, now())] || ''}">${p.expiry === NO_EXPIRY ? 'ND · sem validade' : p.expiry ? `${fmtDay(p.expiry)} <small>· ${expiryText(p, now())}</small>` : 'Não informada'}</b>${(p.lots || []).length ? '' : `<a class="vl-edit" href="#editar/${p.id}">${p.expiry ? 'Alterar validade' : 'Informar validade'}</a>`}</div>
     </div>
     ${productExtras(p)}
     <p class="small muted">Atualizado em ${fmtDateTime(p.updatedAt)}${p.updatedBy ? ' por ' + esc(p.updatedBy) : ''}.</p>
@@ -875,7 +902,7 @@ async function viewForm(id) {
       <input id="ct" type="text" maxlength="40" list="ct-list" value="${esc(p?.category || '')}" placeholder="Ex.: Insumos">
       <datalist id="ct-list">${categories().map(c => `<option value="${esc(c)}">`).join('')}</datalist>
       <label for="fn">Fornecedor ${req}</label>
-      <input id="fn" type="text" maxlength="60" list="fn-list" value="${esc(p?.supplier || '')}" placeholder="Ex.: Cremer">
+      <input id="fn" type="text" maxlength="60" list="fn-list" value="${esc(p?.supplier || '')}" placeholder="Ex.: Dental Cremer">
       <datalist id="fn-list">${suppliers().map(c => `<option value="${esc(c)}">`).join('')}</datalist>
       <div class="hint">Onde a clínica compra este produto.</div>
       <div class="row">
@@ -885,6 +912,14 @@ async function viewForm(id) {
           <input id="mn" type="number" inputmode="numeric" min="1" step="1" value="${p && Number(p.min) >= 1 ? p.min : ''}"></div>
       </div>
       <div class="hint">Abaixo do alerta, o produto fica vermelho, entra no radar e você recebe o e-mail.</div>
+      ${p && (p.lots || []).length ? `<label>Data de validade</label>
+      <div class="lot-note">${I.calendar}<span>Controlada pelos lotes: vence primeiro em <b>${fmtDay(sortedLots(p)[0]?.expiry || p.expiry)}</b>. Veja e altere os lotes na página do produto.</span></div>` : `
+      <label for="vl">Data de validade ${req}</label>
+      <div class="row vrow">
+        <input id="vl" type="date" value="${p?.expiry && p.expiry !== NO_EXPIRY ? esc(p.expiry) : ''}" ${p?.expiry === NO_EXPIRY ? 'disabled' : ''}>
+        <label class="nd"><input type="checkbox" id="nd" ${p?.expiry === NO_EXPIRY ? 'checked' : ''}><span>ND</span><small>sem validade</small></label>
+      </div>
+      <div class="hint">Do lote que está na prateleira (o que vence primeiro). Vencidos ficam vermelhos; a ${EXPIRY_SOON} dias do vencimento o produto entra no radar.</div>`}
       <label for="id">Estoque ideal</label>
       <input id="id" type="number" inputmode="numeric" min="1" step="1" value="${p && Number(p.ideal) >= 1 ? p.ideal : ''}">
       <div class="hint">Opcional. A lista de compras sugere comprar até o ideal.</div>
@@ -897,14 +932,6 @@ async function viewForm(id) {
       </div>
       ${isOwner() ? `<a class="small-link" href="#precos">${I.money}Atualizar preços de todos os produtos de uma vez</a>` : ''}
       <div class="hint">O preço mostra quanto dinheiro está no estoque e quanto se gasta por mês. O código de barras deixa a conferência mais rápida.</div>
-      ${p && (p.lots || []).length ? `<label>Data de validade</label>
-      <div class="lot-note">${I.calendar}<span>Controlada pelos lotes: vence primeiro em <b>${fmtDay(sortedLots(p)[0]?.expiry || p.expiry)}</b>. Veja e altere os lotes na página do produto.</span></div>` : `
-      <label for="vl">Data de validade ${req}</label>
-      <div class="row vrow">
-        <input id="vl" type="date" value="${p?.expiry && p.expiry !== NO_EXPIRY ? esc(p.expiry) : ''}" ${p?.expiry === NO_EXPIRY ? 'disabled' : ''}>
-        <label class="nd"><input type="checkbox" id="nd" ${p?.expiry === NO_EXPIRY ? 'checked' : ''}><span>ND</span><small>sem validade</small></label>
-      </div>
-      <div class="hint">Do lote que está na prateleira (o que vence primeiro). Vencidos ficam vermelhos; a ${EXPIRY_SOON} dias do vencimento o produto entra no radar.</div>`}
       <label>Foto</label>
       <div class="row">
         <button type="button" class="secondary" id="cam">${I.camera}Tirar foto</button>
@@ -949,7 +976,7 @@ async function viewForm(id) {
   $('#f').onsubmit = async e => {
     e.preventDefault();
     const name = sentenceCase($('#nm').value.trim().replace(/\s+/g, ' '));
-    const cat = $('#ct').value.trim().replace(/\s+/g, ' ');
+    const cat = sentenceCase($('#ct').value.trim().replace(/\s+/g, ' '));
     const sup = $('#fn').value.trim().replace(/\s+/g, ' ');
     const qt = $('#qt').value.trim(), mn = $('#mn').value.trim();
     const idl = $('#id').value.trim();
@@ -1341,9 +1368,9 @@ async function viewSettings() {
     <div class="card"><div id="members" class="small muted">Carregando…</div></div>` : ''}
     <h3>Notificações e número no ícone</h3>
     <div class="card small">
-      <p style="margin-top:0">${isOwner() ? 'Receba no celular um aviso a cada mudança no estoque, e veja no ícone do app quantos produtos estão abaixo do alerta ou vencidos, mesmo com o app fechado.' : 'Mostra no ícone do app quantos produtos estão abaixo do alerta ou vencidos.'}</p>
+      <p style="margin-top:0">${isOwner() ? 'Receba no celular um aviso a cada mudança no estoque, um resumo às 8h (dias úteis) e o lembrete da conferência às 17h. O número no ícone do app mostra quantos produtos estão abaixo do alerta (inclui os esgotados) ou vencidos, mesmo com o app fechado.' : 'Receba às 17h (dias úteis) o lembrete quando a conferência do dia ainda não foi feita. O número no ícone do app mostra quantos produtos estão abaixo do alerta ou vencidos.'}</p>
       <p id="push-st" class="muted">${pushStatusText()}</p>
-      ${pushCanAsk() ? `<p style="margin-bottom:0"><button class="block secondary" id="push-on">${isOwner() ? 'Ativar notificações' : 'Ativar número no ícone'}</button></p>` : ''}
+      ${pushCanAsk() ? `<p style="margin-bottom:0"><button class="block secondary" id="push-on">Ativar notificações</button></p>` : ''}
     </div>
     <h3>Instalar no celular</h3>
     <div class="card small">
@@ -1376,12 +1403,9 @@ async function viewSettings() {
       const r = await Notification.requestPermission();
       if (r !== 'granted') { st.textContent = 'Permissão negada. Para ativar depois, libere as notificações do app nos ajustes do celular.'; po.disabled = false; return; }
       updateBadge();
-      if (isOwner() && 'PushManager' in window) {
+      if ('PushManager' in window) {
         st.textContent = 'Ativando…';
-        const reg = await navigator.serviceWorker.ready;
-        const key = await cloud.pushKey();
-        const sub = await reg.pushManager.getSubscription() || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uBytes(key) });
-        await cloud.pushSave(sub);
+        const sub = await pushSubscribe();
         await cloud.pushTest(sub.endpoint, badgeCount());
         st.textContent = 'Ativado neste celular. Enviei uma notificação de teste.';
       } else st.textContent = 'Número no ícone ativado neste celular.';

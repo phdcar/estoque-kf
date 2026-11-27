@@ -729,3 +729,8 @@ h3 .h-n { font-family: var(--sans); font-size: 14px; margin-left: 4px; }
 .ph-sup b { font-weight: 500; white-space: nowrap; }
 .ph-empty { margin: 0; }
 .price-hist .ph-empty + .small-link { margin-top: 12px; }
+
+/* v0.8: pedido sugerido com previsão */
+.sub-lead { margin: -4px 2px 12px; line-height: 1.5; }
+#shop .it small b.fc { color: var(--gold-ink, #CDB27E); font-weight: 500; letter-spacing: .02em; }
+.vl-edit { display: inline-block; margin-top: 6px; font-size: 13px; color: var(--gold-ink); text-decoration: none; }

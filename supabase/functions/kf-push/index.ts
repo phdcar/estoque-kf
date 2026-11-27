@@ -5,6 +5,7 @@
 // Ações (POST JSON):
 //   { acao: 'chave' }                                  -> { chave: <chave pública VAPID> }
 //   { acao: 'enviar', title, body, badge, segredo }    -> envia para os celulares do dono
+//   { acao: 'enviar', todos: true, ... }               -> envia para todos os membros (lembrete da conferência, v0.8)
 //   { acao: 'teste', endpoint }                        -> envia uma notificação de teste para esse celular
 // Implanta com "Enforce JWT verification" desligado.
 
@@ -104,7 +105,7 @@ if ((globalThis as any).Deno?.serve) (globalThis as any).Deno.serve(async (req: 
     }
     if (q.acao === 'enviar') {
       if (!q.segredo || q.segredo !== c.segredo) return json({ erro: 'não autorizado' }, 401);
-      const subs = await db('rpc/kf_push_destinos', { method: 'POST', body: '{}' });
+      const subs = await db(q.todos === true ? 'rpc/kf_push_destinos_todos' : 'rpc/kf_push_destinos', { method: 'POST', body: '{}' });
       const res = [];
       for (const s of subs) res.push(await send(s, { title: q.title || 'Estoque KF', body: q.body || '', badge: q.badge ?? null, url: APP_URL }, c).catch(e => String(e)));
       return json({ enviados: res });
