@@ -728,7 +728,7 @@ try {
   });
 
   await step('revisão visual: todas as telas no tamanho do iPhone (390x844)', async () => {
-    mkdirSync(path.join(SHOTS, 'qa'), { recursive: true });
+    mkdirSync(path.join(SHOTS, 'qa', 'tela'), { recursive: true });
     const id = fake.tables.produtos.find(p => p.nome === 'Álcool 70% 1L').id;
     const screens = [['dono', op, ['#painel', '#estoque', '#estoque/alerta', '#produto/' + id, '#editar/' + id, '#novo', '#conferencia', '#historico', '#precos', '#ajustes']],
       ['func', page, ['#painel', '#estoque', '#conferencia', '#ajustes']]];
@@ -742,7 +742,9 @@ try {
         assert.deepEqual(over, [], `${who} ${r}: elementos passando da tela`);
         if (r.startsWith('#editar')) { await pg.evaluate(() => document.querySelector('.vrow, .lot-note').scrollIntoView({ block: 'center' })); await pg.waitForTimeout(300); await pg.screenshot({ path: path.join(SHOTS, 'qa', 'vrow.png') }); }
         await pg.screenshot({ path: path.join(SHOTS, 'qa', `${who}-${r.slice(1).replace(/\//g, '_').slice(0, 20)}.png`), fullPage: true });
-        // Estoque: também a tela como aparece no celular (topo e rolada), para revisar o vidro (Liquid Glass)
+        // a tela como aparece no celular (topo), para revisar o vidro (Liquid Glass) em todas as telas
+        await pg.evaluate(() => window.scrollTo(0, 0)); await pg.waitForTimeout(200);
+        await pg.screenshot({ path: path.join(SHOTS, 'qa', 'tela', `${who}-${r.slice(1).split('/')[0]}${r.includes('/alerta') ? '-alerta' : ''}.png`) });
         if (r === '#estoque' && who === 'dono') {
           await pg.screenshot({ path: path.join(SHOTS, 'qa', 'estoque-tela-topo.png') });
           await pg.evaluate(() => window.scrollTo(0, 430)); await pg.waitForTimeout(400);
